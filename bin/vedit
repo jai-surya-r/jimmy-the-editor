@@ -1,0 +1,9 @@
+#!/bin/sh
+# JIMMY_NODE: the desktop app runs vedit on its own Node (see scriptEnv in server/util.js)
+dir=$(dirname "$0")
+if [ -n "$JIMMY_NODE" ]; then exec "$JIMMY_NODE" "$dir/vedit.mjs" "$@"; fi
+# a session started outside Jimmy: the installed app is its own Node, so none has to be installed
+for app in "$dir/../../../MacOS/Jimmy - The Editor" "$dir/../../../Jimmy - The Editor.exe"; do
+  if [ -x "$app" ]; then ELECTRON_RUN_AS_NODE=1 exec "$app" "$dir/vedit.mjs" "$@"; fi
+done
+exec node "$dir/vedit.mjs" "$@"

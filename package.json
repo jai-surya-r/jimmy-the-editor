@@ -1,0 +1,41 @@
+{
+  "name": "claude-edit",
+  "productName": "Jimmy - The Editor",
+  "version": "0.1.0",
+  "description": "A local, Claude-driven video editor: timeline, bins, sequences, tabs, embedded Claude Code, Frame.io-style review.",
+  "license": "GPL-3.0-or-later",
+  "author": "Jai Surya R",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "bin": {
+    "vedit": "bin/vedit.mjs"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "app": "electron .",
+    "dev": "node --watch-path=server server/index.js",
+    "make-media": "node tests/make-media.mjs",
+    "golden": "node tests/golden/run.mjs",
+    "golden:ref": "node tests/golden/capture.mjs --ref",
+    "bench": "node tests/bench.mjs",
+    "fetch-ffmpeg": "node tools/fetch-ffmpeg.mjs",
+    "make-icons": "electron tools/make-icons.cjs",
+    "dist": "npm run fetch-ffmpeg && electron-builder"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.15",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "htm": "^3.1.1",
+    "preact": "^10.29.8",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.17.0"
+  }
+}

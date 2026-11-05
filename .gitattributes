@@ -1,0 +1,3 @@
+# Files here mix CRLF and LF on purpose (bin/vedit.mjs and bin/start-mac.sh must stay LF).
+# Store every file byte-for-byte so git never rewrites line endings.
+* -text

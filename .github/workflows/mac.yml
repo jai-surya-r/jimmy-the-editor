@@ -1,0 +1,183 @@
+# The Mac app, built and tested on GitHub's Macs (Apple Silicon; the Intel build is checked under Rosetta).
+#   dmg:  the LGPL ffmpeg it ships (tools/build-ffmpeg-mac.sh; there is no prebuilt one) and the dmgs for both chips
+#   code: the test suite against this repo's code (plain server, then the Electron app)
+#   app:  the built dmg installed into /Applications and tested as a user would get it
+# Run it from the Actions tab (or `gh workflow run mac`), or push a v* tag. Unsigned (ad-hoc): on first open,
+# macOS asks the user to confirm (right-click › Open, or System Settings › Privacy & Security › Open Anyway).
+name: mac
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Mac image (another one when GitHub has no free Mac of the default kind)'
+        default: macos-latest
+        type: choice
+        options: [macos-latest, macos-15, macos-14]
+  push:
+    tags: ['v*']
+jobs:
+  dmg:
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: brew install nasm pkg-config
+      - run: npm ci
+      # ffmpeg takes a while to build: kept between runs until the build script changes
+      - uses: actions/cache@v4
+        with:
+          path: vendor/ffmpeg
+          key: ffmpeg-mac-${{ hashFiles('tools/build-ffmpeg-mac.sh') }}
+      - name: Build LGPL ffmpeg (arm64 and x64)
+        run: |
+          [ -x vendor/ffmpeg/darwin-arm64/ffmpeg ] || bash tools/build-ffmpeg-mac.sh arm64
+          [ -x vendor/ffmpeg/darwin-x64/ffmpeg ] || bash tools/build-ffmpeg-mac.sh x86_64
+      - name: Check the ffmpeg builds
+        run: |
+          for a in arm64 x64; do
+            f=vendor/ffmpeg/darwin-$a/ffmpeg
+            file "$f" vendor/ffmpeg/darwin-$a/ffprobe
+            otool -L "$f" | tail -n +2 | grep -v -E '^\s*(/System/Library/|/usr/lib/)' && { echo "::error::$f links a library outside macOS"; exit 1; } || true
+          done
+          vendor/ffmpeg/darwin-arm64/ffmpeg -hide_banner -version | head -3
+          enc="$(vendor/ffmpeg/darwin-arm64/ffmpeg -hide_banner -encoders)"
+          for e in libopenh264 h264_videotoolbox hevc_videotoolbox prores_ks libvpx-vp9 aac flac; do echo "$enc" | grep -q " $e " || { echo "::error::encoder $e missing"; exit 1; }; done
+          dec="$(vendor/ffmpeg/darwin-arm64/ffmpeg -hide_banner -decoders)"
+          for d in h264 hevc prores png mjpeg vp9 aac mp3 pcm_s24le; do echo "$dec" | grep -q " $d " || { echo "::error::decoder $d missing"; exit 1; }; done
+          vendor/ffmpeg/darwin-arm64/ffmpeg -hide_banner -buildconf | grep -E 'enable-gpl|enable-nonfree' && { echo "::error::not an LGPL build"; exit 1; } || true
+          arch -x86_64 vendor/ffmpeg/darwin-x64/ffmpeg -hide_banner -version | head -1
+      # npm installs only this Mac's native terminal package (node-pty ships one per processor); the Intel app needs its
+      # own, or it stops at start with "could not find the platform-specific package"
+      - name: Add the Intel terminal package
+        run: |
+          v="$(node -p "require('./node_modules/@lydell/node-pty/package.json').optionalDependencies['@lydell/node-pty-darwin-x64']")"
+          d=node_modules/@lydell/node-pty-darwin-x64
+          [ -d "$d" ] || { mkdir -p "$d"; curl -fsSL "$(npm view @lydell/node-pty-darwin-x64@$v dist.tarball)" | tar xz -C "$d" --strip-components=1; }
+          ls node_modules/@lydell/
+      - name: Build the dmgs
+        run: npx electron-builder --mac --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Check the apps' signatures
+        run: |
+          for d in dist/mac-arm64 dist/mac; do
+            codesign --verify --deep --strict --verbose=2 "$d/Jimmy - The Editor.app"
+            codesign -dv "$d/Jimmy - The Editor.app" 2>&1 | grep -E 'Signature|Identifier'
+          done
+          for p in 'mac-arm64:arm64' 'mac:x64'; do
+            m="dist/${p%%:*}/Jimmy - The Editor.app/Contents/Resources/app"
+            [ -d "$m/node_modules/@lydell/node-pty-darwin-${p##*:}" ] || { echo "::error::the ${p##*:} app has no node-pty-darwin-${p##*:}"; exit 1; }
+            [ -x "$m/vendor/ffmpeg/darwin-${p##*:}/ffmpeg" ] || { echo "::error::the ${p##*:} app has no ffmpeg"; exit 1; }
+          done
+          ls -la dist/*.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jimmy-mac
+          path: dist/*.dmg
+
+  code:
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: brew install ffmpeg
+      - run: npm ci
+      - name: Server tests (plain Node, Chrome render pages)
+        run: >-
+          node tests/run-suite.mjs "Server on macOS"
+          tests/mac-disk.mjs tests/scheduler.mjs tests/chat-tasks.mjs tests/chat-paths.mjs tests/clip-names.mjs
+          tests/xml-timecode.mjs tests/template-files.mjs tests/export-folder.mjs tests/audio-export.mjs
+          tests/proxy-duplicate.mjs tests/project-close.mjs "npm run golden" tests/export-options.mjs
+          tests/transcripts.mjs tests/check-image.mjs tests/motion-signature.mjs
+      - name: Desktop app tests (this repo's Electron)
+        if: always()
+        env:
+          JIMMY_APP: electron
+        run: >-
+          node tests/run-suite.mjs "Electron app on macOS"
+          tests/timeline-ui.mjs tests/shortcut-split.mjs tests/accounts-remove.mjs tests/stuck-tab.mjs
+          tests/no-delete.mjs tests/chunk-stall.mjs tests/export-options.mjs tests/project-close.mjs
+          tests/export-name.mjs tests/settings-save.mjs tests/bin-views.mjs tests/organise.mjs
+          tests/gap-select.mjs tests/review-clear.mjs tests/snapshots.mjs tests/reframe.mjs tests/sync.mjs
+          tests/nest-adjust.mjs tests/chat-stop.mjs tests/chat-speed.mjs tests/claude-priority.mjs tests/step82.mjs tests/layout.mjs
+          tests/heavy-ui.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-code
+          include-hidden-files: true
+          path: |
+            tests/.work/suite/
+            tests/.work/*.log
+            tests/golden/report.html
+
+  app:
+    needs: dmg
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: brew install ffmpeg
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: jimmy-mac
+          path: dmg
+      - name: Install from the dmgs (as a user would drag it to Applications)
+        run: |
+          ls -la dmg
+          for a in arm64 x64; do
+            m="$(mktemp -d)"
+            hdiutil attach -nobrowse -readonly -mountpoint "$m" dmg/*-mac-$a.dmg
+            ls "$m"
+            [ -L "$m/Applications" ] || { echo "::error::the $a dmg has no Applications link to drag to"; exit 1; }
+            dest=/Applications; [ $a = x64 ] && dest="$HOME/Intel"; mkdir -p "$dest"
+            ditto "$m/Jimmy - The Editor.app" "$dest/Jimmy - The Editor.app"
+            hdiutil detach "$m"
+          done
+          app="/Applications/Jimmy - The Editor.app"
+          codesign --verify --deep --strict "$app"
+          file "$app/Contents/MacOS/Jimmy - The Editor"
+          ls "$app/Contents/Resources/app/vendor/ffmpeg/"
+          "$app/Contents/Resources/app/vendor/ffmpeg/darwin-arm64/ffmpeg" -hide_banner -version | head -1
+          # what a downloaded copy meets: Gatekeeper refuses an unsigned app until the user confirms it (expected)
+          spctl --assess --type execute -vv "$app" || echo "Gatekeeper: not notarized (expected for an unsigned build)"
+      - name: VideoToolbox on this Mac (GitHub's Macs are virtual; this may be unavailable)
+        run: |
+          f="/Applications/Jimmy - The Editor.app/Contents/Resources/app/vendor/ffmpeg/darwin-arm64/ffmpeg"
+          "$f" -hide_banner -v error -f lavfi -i testsrc2=size=1280x720:rate=30 -t 2 -c:v h264_videotoolbox -y /tmp/vt.mp4 && echo "VideoToolbox H.264: works" || echo "VideoToolbox H.264: not available on this runner"
+      - name: Tests on the installed app (Apple Silicon)
+        env:
+          JIMMY_APP: electron
+          JIMMY_APP_EXE: /Applications/Jimmy - The Editor.app/Contents/MacOS/Jimmy - The Editor
+        run: >-
+          node tests/run-suite.mjs "Installed app (Apple Silicon)"
+          tests/export-options.mjs tests/timeline-ui.mjs tests/shortcut-split.mjs tests/accounts-remove.mjs tests/no-delete.mjs
+      - name: Tests on the installed Intel app (under Rosetta)
+        if: always()
+        env:
+          JIMMY_APP: electron
+          JIMMY_APP_EXE: /Users/runner/Intel/Jimmy - The Editor.app/Contents/MacOS/Jimmy - The Editor
+          JIMMY_START_SECONDS: 180
+        run: node tests/run-suite.mjs "Installed app (Intel, Rosetta)" tests/export-options.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-app
+          include-hidden-files: true
+          path: |
+            tests/.work/suite/
+            tests/.work/*.log
+            tests/.work/app-data/logs/

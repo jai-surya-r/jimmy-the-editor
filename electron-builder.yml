@@ -1,0 +1,52 @@
+# npm run dist: installers for the desktop app (electron-builder).
+#   Windows: NSIS installer (per-user, %LOCALAPPDATA%\Programs) + portable zip
+#   macOS:   dmg for arm64 and x64 (built on a Mac: .github/workflows/mac.yml)
+appId: com.jimmy.editor
+productName: Jimmy - The Editor
+copyright: Copyright © 2026 Jai Surya R
+directories:
+  output: dist
+  buildResources: build
+# Plain files, no app.asar: vedit, Claude's image-check hook and the render workers run the app's files as separate
+# programs (shell scripts and ELECTRON_RUN_AS_NODE), which can't read inside an asar archive.
+asar: false
+# @lydell/node-pty ships N-API prebuilds that load in Electron as they are
+npmRebuild: false
+afterPack: build/adhoc-sign.cjs
+files:
+  - package.json
+  - electron/**
+  - server/**
+  - public/**
+  - bin/**
+  - "!bin/start-mac.sh"
+  - templates/**
+  - luts/**
+  - LICENSE
+  - THIRD_PARTY.md
+  # the bundled LGPL ffmpeg for the platform being built (npm run fetch-ffmpeg); missing on macOS for now
+  - vendor/ffmpeg/${platform}-${arch}/**
+win:
+  icon: build/icon.png
+  # the zip (portable); the installer has its own name below
+  artifactName: Jimmy-The-Editor-${version}-win-${arch}.${ext}
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+nsis:
+  oneClick: true
+  perMachine: false
+  shortcutName: Jimmy - The Editor
+  artifactName: Jimmy-The-Editor-Setup-${version}.${ext}
+mac:
+  icon: build/icon.png
+  # no certificate: signed ad hoc after packing (build/adhoc-sign.cjs), so macOS offers "Open Anyway" instead of "damaged"
+  identity: null
+  category: public.app-category.video
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+dmg:
+  artifactName: Jimmy-The-Editor-${version}-mac-${arch}.${ext}

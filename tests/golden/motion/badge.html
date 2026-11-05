@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Golden badge</title>
+<!-- Golden-test motion graphic: a spinning ring and a label sliding in, on a transparent page. System font only. -->
+<script type="application/json" id="motion">
+{ "duration": 4, "params": { "label": "GOLDEN", "accent": "#ff3d6e" } }
+</script>
+<style>
+  body { width: 100vw; height: 100vh; margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+  .ring {
+    position: absolute; left: 8vw; top: 10vh; width: 22vh; height: 22vh; border-radius: 50%;
+    border: 2.4vh solid var(--accent); border-right-color: transparent; box-sizing: border-box;
+    animation: spin 2s linear infinite, pop 0.6s cubic-bezier(.2,.8,.2,1) both;
+  }
+  .label {
+    position: absolute; left: 8vw; top: 35vh; font-size: 7vh; font-weight: 700; color: #fff;
+    letter-spacing: 0.3vh; background: rgba(0,0,0,.45); padding: 1vh 2vh; border-radius: 1vh;
+    animation: slide 0.8s cubic-bezier(.2,.8,.2,1) 0.3s both, out 0.4s ease-in 3.5s forwards;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pop { from { opacity: 0; scale: 0.4; } to { opacity: 1; scale: 1; } }
+  @keyframes slide { from { opacity: 0; transform: translateX(-10vw); } to { opacity: 1; transform: none; } }
+  @keyframes out { to { opacity: 0; } }
+</style>
+</head>
+<body>
+  <div class="ring"></div>
+  <div class="label" data-param="label">GOLDEN</div>
+</body>
+</html>

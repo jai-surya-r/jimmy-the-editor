@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Lower third</title>
+<!--
+  A Jimmy motion graphic: an ordinary web page rendered frame by frame into a transparent video.
+  - Defaults below show up as editable fields in the editor's Inspector (title, colors, …).
+  - Elements with data-param="key" get that value as text; every param is also a CSS variable (--key).
+  - CSS animations, GSAP, canvas and requestAnimationFrame loops all render frame-exactly.
+  - Leave the page background transparent so it composites over the footage.
+-->
+<script type="application/json" id="motion">
+{
+  "duration": 5,
+  "params": {
+    "title": "Your Name",
+    "subtitle": "Title or role",
+    "accent": "#ff3d6e",
+    "textColor": "#ffffff"
+  }
+}
+</script>
+<style>
+  body { width: 100vw; height: 100vh; overflow: hidden; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  .lt { position: absolute; left: 6vw; bottom: 13vh; display: flex; gap: 1.1vw; align-items: stretch; }
+  .bar {
+    width: 0.45vw; background: var(--accent); transform-origin: 50% 100%;
+    animation: grow 0.55s cubic-bezier(.2,.8,.2,1) both, shrink 0.4s ease-in 4.4s forwards;
+  }
+  .text { display: flex; flex-direction: column; gap: 0.4vh; }
+  .title, .subtitle { color: var(--textColor); white-space: nowrap; text-shadow: 0 0.2vh 1.2vh rgba(0,0,0,.35); }
+  .title { font-size: 5vh; font-weight: 700; letter-spacing: -0.02em; animation: reveal 0.6s cubic-bezier(.2,.8,.2,1) 0.15s both, hide 0.35s ease-in 4.3s forwards; }
+  .subtitle { font-size: 2.8vh; font-weight: 500; opacity: .85; animation: reveal 0.6s cubic-bezier(.2,.8,.2,1) 0.3s both, hide 0.35s ease-in 4.35s forwards; }
+  @keyframes grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  @keyframes shrink { to { transform: scaleY(0); } }
+  @keyframes reveal { from { clip-path: inset(0 100% 0 0); transform: translateX(-2vw); } to { clip-path: inset(0 0 0 0); transform: none; } }
+  @keyframes hide { to { clip-path: inset(0 0 0 100%); transform: translateX(1vw); } }
+</style>
+</head>
+<body>
+  <div class="lt">
+    <div class="bar"></div>
+    <div class="text">
+      <div class="title" data-param="title">Your Name</div>
+      <div class="subtitle" data-param="subtitle">Title or role</div>
+    </div>
+  </div>
+</body>
+</html>

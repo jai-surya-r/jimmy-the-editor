@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jimmy - The Editor</title>
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icon-black.svg" type="image/svg+xml" media="(prefers-color-scheme: light)">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/vendor/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "preact": "/vendor/preact/dist/preact.module.js",
+      "preact/hooks": "/vendor/preact/hooks/dist/hooks.module.js",
+      "htm": "/vendor/htm/dist/htm.module.js",
+      "htm/preact": "/vendor/htm/preact/index.module.js",
+      "@xterm/xterm": "/vendor/@xterm/xterm/lib/xterm.mjs",
+      "@xterm/addon-fit": "/vendor/@xterm/addon-fit/lib/addon-fit.mjs"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

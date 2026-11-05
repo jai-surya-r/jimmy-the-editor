@@ -1,0 +1,19 @@
+node_modules/
+data/
+projects/
+kits/
+Release/
+.cache/
+*.zip
+*.part.mp4
+target/
+dist/
+tests/.work/
+tests/golden/ref/
+tests/golden/report.html
+vendor/ffmpeg/
+tests/golden/text-report.html
+# local only: the working notes and rules for Claude, and loose documents
+/CLAUDE.md
+/docs/PROGRESS.md
+/*.pdf
