@@ -3,6 +3,7 @@ import {
   uid, clipEnd, fitScale, usesSourceTime, deepClone, videoTracks, audioTracks,
   DEFAULT_TRANSFORM, CAPTION_STYLE, DEFAULT_TEXT_STYLE, normalizeTextStyle, isAnimated, propAt, staticValue,
   FX_PROPS, CROP_PROPS, DEFAULT_EFFECTS, DEFAULT_CROP, clamp, segmentHandles, DEFAULT_BELOW, BELOW_PROPS, findSequence, sequenceDuration,
+  isNestAudio, sequenceHasSound,
 } from './model.js';
 
 const EPS = 1e-6;
@@ -289,7 +290,7 @@ export function nestsItself(project, outerId, innerId, seen = new Set()) {
   if (seen.has(innerId)) return false;
   seen.add(innerId);
   const s = findSequence(project, innerId);
-  return !!s && s.clips.some((c) => c.type === 'sequence' && nestsItself(project, outerId, c.sequence, seen));
+  return !!s && s.clips.some((c) => (c.type === 'sequence' || isNestAudio(c)) && nestsItself(project, outerId, c.sequence, seen));
 }
 
 // A nested sequence clip of sequence `innerId` at `start` on a video track, over what is there (like dropping media).
@@ -301,7 +302,24 @@ export function insertSequence(project, seq, innerId, { start, trackId }) {
   const c = { id: uid('c'), type: 'sequence', sequence: innerId, track: target.id, start, duration, in: 0, speed: 1, transform: { ...DEFAULT_TRANSFORM } };
   clearRange(seq, target.id, start, start + duration);
   seq.clips.push(c);
+  addNestedSound(project, seq, c, audioTracks(seq)[0], true);
   return c;
+}
+
+// The nested clip's sound as one audio clip linked to it (as a video file's sound is), when its sequence has any:
+// on `track` (over what is there, like dropping media) or, with overwrite false, on the first audio track free
+// there (or a new one).
+function addNestedSound(project, seq, v, track, overwrite) {
+  if (!sequenceHasSound(project, v.sequence)) return null;
+  const end = clipEnd(v);
+  const free = (t) => !seq.clips.some((c) => c.track === t.id && c.start < end - EPS && clipEnd(c) > v.start + EPS);
+  if (!track || (!overwrite && !free(track))) track = audioTracks(seq).find(free) || addTrack(seq, 'audio');
+  v.link = v.link || uid('l');
+  v.audioClip = true;
+  const a = { id: uid('c'), type: 'audio', sequence: v.sequence, track: track.id, start: v.start, duration: v.duration, in: v.in || 0, speed: v.speed || 1, volume: 1, link: v.link };
+  if (overwrite) clearRange(seq, track.id, a.start, end);
+  seq.clips.push(a);
+  return a;
 }
 
 // Premiere's Nest: the clips move into a new sequence (same frame, same tracks, starting at 0) and one nested clip
@@ -324,6 +342,8 @@ export function nestClips(project, seq, ids, name) {
   if (!track) track = videoTracks(seq).find((t) => !seq.clips.some((c) => c.track === t.id && c.start < t1 - EPS && clipEnd(c) > t0 + EPS)) || addTrack(seq, 'video');
   const clip = { id: uid('c'), type: 'sequence', sequence: inner.id, track: track.id, start: t0, duration: t1 - t0, in: 0, speed: 1, transform: { ...DEFAULT_TRANSFORM } };
   seq.clips.push(clip);
+  // its sound: one audio clip, on the lowest audio track the moved sound was on (free now) or the first free one
+  addNestedSound(project, seq, clip, audioTracks(seq).find((t) => used.has(t.id)), false);
   return { sequence: inner, clip };
 }
 
@@ -494,7 +514,7 @@ export function pasteClips(seq, clips, t) {
 export function clipLabel(clip, mediaById, project = null) {
   if (clip.name) return clip.name;
   if (clip.type === 'adjust') return 'Adjustment layer';
-  if (clip.type === 'sequence') return (project && findSequence(project, clip.sequence)?.name) || 'Nested sequence';
+  if (clip.type === 'sequence' || isNestAudio(clip)) return (project && findSequence(project, clip.sequence)?.name) || 'Nested sequence';
   if (clip.type === 'text') return (clip.text || 'Text').split('\n')[0];
   if (clip.type === 'solid') return 'Color matte';
   return mediaById[clip.media]?.name || 'Missing media';

@@ -440,28 +440,69 @@ export function resolveFrame(seq, t) {
 // Sequences without nested clips come back as they are. A sequence nested in itself (at any depth) is left out.
 const nestSizes = new Map(); // sequence id -> { width, height }, for layerSize
 export const nestSize = (id) => nestSizes.get(id) || null;
+// Nested sound: an audio clip with `sequence` (and no media) plays that sequence's sound, as a nested clip shows its
+// picture: one clip on the outer timeline, linked to the nested video clip, whose volume, fades and keyframes apply to
+// the whole mix (and its track's mute, solo and volume). A nested video clip with `audioClip: true` leaves its sound
+// to such a clip; one without (made before nested sound had a clip of its own) still plays its sequence's sound.
+export const isNestAudio = (c) => c?.type === 'audio' && !!c.sequence;
+const hasNested = (seq) => !!seq?.clips?.some((c) => c.type === 'sequence' || isNestAudio(c));
+
+// A copy of inner clip `ic` placed where nested clip `c` shows it (trimmed to c's window w0..w1 of the inner
+// timeline, k = c's speed), on track `trackId`; null when c doesn't show it.
+function liftClip(ic, c, trackId, w0, w1, k) {
+  const e = ic.start + ic.duration;
+  const s0 = Math.max(ic.start, w0), s1 = Math.min(e, w1);
+  if (s1 - s0 <= EPS) return null;
+  const head = s0 - ic.start, tail = e - s1;
+  const cc = { ...ic, id: `${c.id}~${ic.id}`, track: trackId, start: c.start + (s0 - w0) / k, duration: (s1 - s0) / k, link: ic.link ? `${c.id}~${ic.link}` : null };
+  if (usesSourceTime(ic)) { cc.in = (ic.in || 0) + head * (ic.speed || 1); cc.speed = (ic.speed || 1) * k; }
+  if (ic.keyframes && (head > EPS || k !== 1)) {
+    cc.keyframes = Object.fromEntries(Object.entries(ic.keyframes).map(([p, list]) => [p, list.map((kf) => ({ ...kf, t: (kf.t - head) / k }))]));
+  }
+  if (head > EPS) { cc.transitionIn = null; if (cc.fadeIn) cc.fadeIn = Math.max(0, cc.fadeIn - head) / k; } else if (cc.transitionIn) cc.transitionIn = { ...cc.transitionIn, duration: cc.transitionIn.duration / k };
+  if (tail > EPS) { cc.transitionOut = null; if (cc.fadeOut) cc.fadeOut = Math.max(0, cc.fadeOut - tail) / k; } else if (cc.transitionOut) cc.transitionOut = { ...cc.transitionOut, duration: cc.transitionOut.duration / k };
+  // the nested audio clips this sound already plays through, moved the same way (whole: their fades stay put)
+  if (ic.gains) cc.gains = ic.gains.map((p) => liftGain(p, c, w0, k));
+  return cc;
+}
+function liftGain(p, c, w0, k) {
+  const q = { ...p, start: c.start + (p.start - w0) / k, duration: p.duration / k };
+  if (k !== 1) {
+    if (p.fadeIn) q.fadeIn = p.fadeIn / k;
+    if (p.fadeOut) q.fadeOut = p.fadeOut / k;
+    if (p.keyframes) q.keyframes = Object.fromEntries(Object.entries(p.keyframes).map(([pr, list]) => [pr, list.map((kf) => ({ ...kf, t: kf.t / k }))]));
+  }
+  return q;
+}
+
 const flatCache = new WeakMap(); // seq -> { project sequences it used, flat }
 export function flattenSequence(project, seq, depth = 0, path = [], deps = null) {
-  if (!seq || seq.flat || !seq.clips?.some((c) => c.type === 'sequence')) return seq; // flattened already, or nothing nested
+  if (!seq || seq.flat || !hasNested(seq)) return seq; // flattened already, or nothing nested
   for (const s of project.sequences) nestSizes.set(s.id, { width: s.width, height: s.height });
   const hit = depth === 0 ? flatCache.get(seq) : null;
   if (hit && hit.deps.every(([id, s]) => findSequence(project, id) === s)) return hit.flat;
   deps = deps || [];
-  const out = { ...seq, flat: true, tracks: [], clips: [...seq.clips] };
+  // nested audio clips are replaced by the sound they stand for
+  const out = { ...seq, flat: true, tracks: [], clips: seq.clips.filter((c) => !isNestAudio(c)) };
   const extraAudio = [];
+  const innerOf = (c) => {
+    const inner0 = findSequence(project, c.sequence);
+    deps.push([c.sequence, inner0]);
+    if (!inner0 || inner0.id === seq.id || path.includes(inner0.id) || depth > 8) return null;
+    return flattenSequence(project, inner0, depth + 1, [...path, seq.id], deps);
+  };
   for (const track of seq.tracks) {
     if (track.kind === 'video') {
       // each nested clip's contents go just below the track the nested clip is on
       for (const c of seq.clips.filter((x) => x.track === track.id && x.type === 'sequence' && x.enabled !== false)) {
-        const inner0 = findSequence(project, c.sequence);
-        deps.push([c.sequence, inner0]);
-        if (!inner0 || inner0.id === seq.id || path.includes(inner0.id) || depth > 8) continue;
-        const inner = flattenSequence(project, inner0, depth + 1, [...path, seq.id], deps);
+        const inner = innerOf(c);
+        if (!inner) continue;
         const nest = { id: c.id, clip: c, width: inner.width, height: inner.height, background: inner.background, path: [...path, seq.id, inner.id] };
         const k = c.speed || 1, w0 = c.in || 0, w1 = w0 + c.duration * k;
         const vmap = {}, amap = {};
         for (const it of inner.tracks) {
           if (it.kind === 'video' && it.hidden) continue;
+          if (it.kind !== 'video' && c.audioClip) continue; // its sound plays through its audio clip
           const vt = { ...it, id: `${c.id}~${it.id}`, name: it.name || '', nest: it.kind === 'video' ? (it.nest ? { ...it.nest, id: `${c.id}~${it.nest.id}` } : nest) : undefined, locked: true, solo: false };
           if (it.kind === 'video') { if (track.hidden) vt.hidden = true; vmap[it.id] = vt; } else amap[it.id] = vt;
         }
@@ -471,19 +512,28 @@ export function flattenSequence(project, seq, depth = 0, path = [], deps = null)
         for (const ic of inner.clips) {
           const vt = vmap[ic.track] || amap[ic.track];
           if (!vt || ic.enabled === false) continue;
-          const e = ic.start + ic.duration;
-          const s0 = Math.max(ic.start, w0), s1 = Math.min(e, w1);
-          if (s1 - s0 <= EPS) continue;
-          const head = s0 - ic.start, tail = e - s1;
-          const cc = { ...ic, id: `${c.id}~${ic.id}`, track: vt.id, start: c.start + (s0 - w0) / k, duration: (s1 - s0) / k, link: ic.link ? `${c.id}~${ic.link}` : null };
-          if (usesSourceTime(ic)) { cc.in = (ic.in || 0) + head * (ic.speed || 1); cc.speed = (ic.speed || 1) * k; }
-          if (ic.keyframes && (head > EPS || k !== 1)) {
-            cc.keyframes = Object.fromEntries(Object.entries(ic.keyframes).map(([p, list]) => [p, list.map((kf) => ({ ...kf, t: (kf.t - head) / k }))]));
-          }
-          if (head > EPS) { cc.transitionIn = null; if (cc.fadeIn) cc.fadeIn = Math.max(0, cc.fadeIn - head) / k; } else if (cc.transitionIn) cc.transitionIn = { ...cc.transitionIn, duration: cc.transitionIn.duration / k };
-          if (tail > EPS) { cc.transitionOut = null; if (cc.fadeOut) cc.fadeOut = Math.max(0, cc.fadeOut - tail) / k; } else if (cc.transitionOut) cc.transitionOut = { ...cc.transitionOut, duration: cc.transitionOut.duration / k };
-          if (k !== 1 && !usesSourceTime(ic)) { /* stills, text, solids, adjustment layers: just placed and timed */ }
-          out.clips.push(cc);
+          const cc = liftClip(ic, c, vt.id, w0, w1, k);
+          if (cc) out.clips.push(cc);
+        }
+      }
+    } else {
+      // a nested audio clip: its sequence's sound on tracks of its own, through this track and the clip's gain
+      for (const a of seq.clips.filter((x) => x.track === track.id && isNestAudio(x) && x.enabled !== false)) {
+        const inner = innerOf(a);
+        if (!inner) continue;
+        const k = a.speed || 1, w0 = a.in || 0, w1 = w0 + a.duration * k;
+        const amap = {};
+        for (const it of inner.tracks) {
+          if (it.kind !== 'audio') continue;
+          amap[it.id] = { ...it, id: `${a.id}~${it.id}`, name: it.name || '', nest: undefined, locked: true,
+            solo: !!track.solo, muted: !!(track.muted || it.muted), volume: (track.volume ?? 1) * (it.volume ?? 1) };
+          extraAudio.push(amap[it.id]);
+        }
+        for (const ic of inner.clips) {
+          const at = amap[ic.track];
+          if (!at || ic.type !== 'audio' || ic.enabled === false) continue;
+          const cc = liftClip(ic, a, at.id, w0, w1, k);
+          if (cc) { cc.gains = [...(cc.gains || []), a]; out.clips.push(cc); }
         }
       }
     }
@@ -494,13 +544,54 @@ export function flattenSequence(project, seq, depth = 0, path = [], deps = null)
   return out;
 }
 
-// Gain for an audio clip at timeline time t (clip volume × keyframes × fades). Track gain separate.
-export function audioGainAt(clip, t) {
+// Gain for an audio clip at timeline time t (clip volume × keyframes × fades, and those of the nested audio clips it
+// plays through). Track gain separate.
+function ownGain(clip, t) {
   const local = t - clip.start;
   let g = propAt(clip, 'volume', local);
   if (clip.fadeIn > 0) g *= clamp(local / clip.fadeIn, 0, 1);
   if (clip.fadeOut > 0) g *= clamp((clip.duration - local) / clip.fadeOut, 0, 1);
   return Math.max(0, g);
+}
+export function audioGainAt(clip, t) {
+  let g = ownGain(clip, t);
+  for (const p of clip.gains || []) g *= ownGain(p, t);
+  return g;
+}
+
+// Does sequence `id` make any sound (its own audio clips, or through sequences nested in it)?
+export function sequenceHasSound(project, id, seen = new Set()) {
+  if (seen.has(id)) return false;
+  seen.add(id);
+  const s = findSequence(project, id);
+  return !!s?.clips.some((c) => (c.type === 'audio' && (c.media || c.sequence) && (!c.sequence || sequenceHasSound(project, c.sequence, seen)))
+    || (c.type === 'sequence' && !c.audioClip && sequenceHasSound(project, c.sequence, seen)));
+}
+
+// Nested clips made before nested sound had its own clip get one (once per project: settings.nestAudio), linked to
+// them, on the first audio track free at that time (or a new one). Ids come from the nested clip's, so every reader
+// of the same file makes the same clips.
+function addNestAudio(project) {
+  for (const seq of project.sequences) {
+    for (const v of seq.clips.filter((c) => c.type === 'sequence' && !c.audioClip)) {
+      if (!sequenceHasSound(project, v.sequence)) continue;
+      const end = v.start + v.duration;
+      const free = (t) => !seq.clips.some((c) => c.track === t.id && c.start < end - EPS && c.start + c.duration > v.start + EPS);
+      let track = audioTracks(seq).find(free);
+      if (!track) {
+        let n = audioTracks(seq).length + 1;
+        while (seq.tracks.some((t) => t.id === `a${n}`)) n++;
+        track = { id: `a${n}`, kind: 'audio', name: '', hidden: false, muted: false, locked: false, solo: false, volume: 1 };
+        seq.tracks.push(track);
+      }
+      if (!v.link) v.link = `l_${v.id}`;
+      v.audioClip = true;
+      let id = `${v.id}_a`;
+      while (seq.clips.some((c) => c.id === id)) id += 'a';
+      seq.clips.push({ id, type: 'audio', sequence: v.sequence, track: track.id, start: v.start, duration: v.duration, in: v.in || 0, speed: v.speed || 1,
+        volume: 1, fadeIn: 0, fadeOut: 0, keyframes: {}, enabled: v.enabled !== false, link: v.link, name: '' });
+    }
+  }
 }
 export function audibleTracks(seq) {
   const tracks = audioTracks(seq);
@@ -566,7 +657,7 @@ function inferType(c, media, track) {
     return 'video';
   }
   if (typeof c.text === 'string') return 'text';
-  if (c.sequence) return 'sequence';
+  if (c.sequence) return track?.kind === 'audio' ? 'audio' : 'sequence';
   if (c.below) return 'adjust';
   if (c.color) return 'solid';
   return track?.kind === 'audio' ? 'audio' : 'video';
@@ -591,7 +682,8 @@ export function normalizeClip(c, ctx) {
   } else if (type === 'video' || type === 'audio') {
     out.in = Math.max(0, num(c.in, 0));
     out.speed = clamp(num(c.speed, 1), 0.05, 16);
-    if (!c.media) warnings.push(`clip ${id}: ${type} clip has no "media"`);
+    if (type === 'audio' && c.sequence) out.sequence = str(c.sequence); // nested sound (isNestAudio): no media
+    else if (!c.media) warnings.push(`clip ${id}: ${type} clip has no "media"`);
     else if (!media) warnings.push(`clip ${id}: media "${c.media}" is not in the bin`);
   } else if (type === 'image') {
     if (!c.media) warnings.push(`clip ${id}: image clip has no "media"`);
@@ -765,6 +857,7 @@ export function normalizeProject(input) {
     seqIds.add(n.id);
     return n;
   });
+  if (out.settings.nestAudio !== 1) { addNestAudio(out); out.settings.nestAudio = 1; }
   return { project: out, warnings, snapped: stats.snapped };
 }
 

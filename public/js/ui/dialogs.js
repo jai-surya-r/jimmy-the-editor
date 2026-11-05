@@ -110,13 +110,14 @@ export function NewSequenceDialog({ close, tab, edit, fromMedia, folder }) {
 
 // ------------------------------------------------------------------ export
 
-// Audio-only exports (server/render.js AUDIO_FORMATS)
+// Audio-only exports (server/render.js AUDIO_FORMATS). kbps: for the size shown (FLAC: about 60 % of the WAV).
+// AAC first and by default: a 22-minute mix is about 40 MB, where 24-bit WAV is about 380 MB.
 const AUDIO_EXPORTS = [
-  { value: 'wav24', label: 'WAV 24-bit (.wav)', hint: 'Uncompressed WAV, 24-bit' },
-  { value: 'wav16', label: 'WAV 16-bit (.wav)', hint: 'Uncompressed WAV, 16-bit' },
-  { value: 'flac', label: 'FLAC (.flac) — lossless, smaller', hint: 'Lossless FLAC, 24-bit' },
-  { value: 'mp3', label: 'MP3 320 kbps (.mp3)', hint: 'MP3 at 320 kbps' },
-  { value: 'aac', label: 'AAC 256 kbps (.m4a)', hint: 'AAC at 256 kbps' },
+  { value: 'aac', label: 'AAC 256 kbps (.m4a) — small, plays everywhere', hint: 'AAC at 256 kbps', kbps: 256 },
+  { value: 'mp3', label: 'MP3 320 kbps (.mp3)', hint: 'MP3 at 320 kbps', kbps: 320 },
+  { value: 'flac', label: 'FLAC (.flac) — lossless, smaller than WAV', hint: 'Lossless FLAC, 24-bit', kbps: 1400 },
+  { value: 'wav16', label: 'WAV 16-bit (.wav) — uncompressed, large', hint: 'Uncompressed WAV, 16-bit', kbps: 1536 },
+  { value: 'wav24', label: 'WAV 24-bit (.wav) — uncompressed, largest', hint: 'Uncompressed WAV, 24-bit', kbps: 2304 },
 ];
 
 // Video formats (server/render.js FORMATS). lossy: H.264 / H.265, which take a quality or a bitrate and an MP4 or MOV.
@@ -157,7 +158,7 @@ export function ExportDialog({ close, tab, init }) {
   const last = tab.ui.get().exportOpts || {};
   const [o, setO] = useState(() => ({ ...DEFAULT_EXPORT, format: tab.ui.get().exportFormat || 'h264', ...last, ...(init?.o || {}) }));
   const set = (patch) => setO((cur) => ({ ...cur, ...patch }));
-  const [audioFmt, setAudioFmt] = useState(init?.audioFmt ?? (tab.ui.get().exportAudio || 'wav24'));
+  const [audioFmt, setAudioFmt] = useState(init?.audioFmt ?? (tab.ui.get().exportAudioFormat || 'aac'));
   const { format, quality } = o;
   const audioOnly = format === 'audio';
   const vf = VIDEO_FORMATS.find((f) => f.value === format);
@@ -172,9 +173,7 @@ export function ExportDialog({ close, tab, init }) {
   const scaleFor = (size) => (size === 'full' ? 1 : size === 'half' ? 0.5 : size === 'custom' ? Math.max(16, +o.width || sw) / sw
     : /^s\d+$/.test(size) ? +size.slice(1) / short : 1);
   const scale = scaleFor(o.size);
-  // drafts are 1080p at most (the frame's shorter side; the server keeps to it), smaller sequences keep their size
-  const draftCapped = lossy && !byRate && quality === 'draft' && short * scale > 1080;
-  const outW = evenOf(sw * (draftCapped ? 1080 / short : scale)), outH = evenOf(sh * (draftCapped ? 1080 / short : scale));
+  const outW = evenOf(sw * scale), outH = evenOf(sh * scale);
   const sizeOptions = [
     { value: 'full', label: `Match sequence · ${sw}×${sh}` },
     ...SHORT_SIDES.filter((s) => s !== short).map((s) => ({ value: `s${s}`, label: `${s}p · ${evenOf((sw * s) / short)}×${evenOf((sh * s) / short)}` })),
@@ -229,7 +228,7 @@ export function ExportDialog({ close, tab, init }) {
   const badRate = byRate && !(+o.mbps > 0);
   // File name: the name the server would give it, until the person types their own (null = that default). The server
   // never writes over a file: if the name is taken, the export is saved as "<name> (2)".
-  const ext = audioOnly ? (AUDIO_EXPORTS.find((a) => a.value === audioFmt)?.label.match(/\(\.(\w+)\)/)?.[1] || 'wav') : mov ? 'mov' : 'mp4';
+  const ext = audioOnly ? (AUDIO_EXPORTS.find((a) => a.value === audioFmt)?.label.match(/\(\.(\w+)\)/)?.[1] || 'm4a') : mov ? 'mov' : 'mp4';
   const nextVersion = 1 + Math.max(0, ...((tab.store.get().reviews?.versions || []).filter((v) => v.sequence === seqId).map((v) => v.number || 0)));
   const defaultName = !seq ? '' : audioOnly ? `${seq.name} audio` : canReview && addVersion ? `${seq.name} v${nextVersion}` : `${seq.name} ${stamp}`;
   const shownName = name ?? defaultName;
@@ -238,7 +237,7 @@ export function ExportDialog({ close, tab, init }) {
     setBusy(true);
     try {
       if (outDir) tab.ui.set({ exportDir: outDir });
-      tab.ui.set({ exportFormat: format, ...(audioOnly ? { exportAudio: audioFmt } : { exportOpts: o }) });
+      tab.ui.set({ exportFormat: format, ...(audioOnly ? { exportAudioFormat: audioFmt } : { exportOpts: o }) });
       const a = audio === 'none' ? { codec: 'none' } : audio.startsWith('aac') ? { codec: 'aac', kbps: +audio.slice(3) } : { codec: audio };
       // only a name the person typed goes to the server; the default is worked out there, as before
       const fileName = name != null && name.trim() && name.trim() !== defaultName ? name.trim() : undefined;
@@ -323,7 +322,7 @@ export function ExportDialog({ close, tab, init }) {
           options=${[...new Set([...(folders || []), ...(outDir ? [outDir] : [])])].map((f) => ({ value: f, label: f }))} />
         <${Button} icon="folder" onClick=${browse}>Browse…</${Button}></div></label>
       ${canReview ? html`<${Toggle} checked=${addVersion} onChange=${setAddVersion} label="Add to Review as a new version" />` : null}
-      <div class="dialog-hint">${audioOnly ? html`${AUDIO_EXPORTS.find((a) => a.value === audioFmt)?.hint} · 48 kHz stereo · mixed straight from the sources, no frames rendered · ${timecode(dur, seq?.fps || 30)} · saved to <code>${outDir || '…'}</code>` : html`${summary}${draftCapped ? ' (drafts are 1080p at most)' : ''} · ${timecode(dur, seq?.fps || 30)}${estMB != null ? html` · <b>about ${fmtSize(estMB)}</b>` : ''}${format === 'prores4444' ? ' · the sequence background is left transparent' : ''}${!canReview ? ' · not added to Review (only H.264 MP4s play there)' : ''}${o.fps !== 'match' ? ' · the frame rate is converted after rendering (frames repeated or dropped)' : ''} · saved to <code>${outDir || '…'}</code>${preHint ? html`<br />${preHint}` : null}`}</div>
+      <div class="dialog-hint">${audioOnly ? html`${AUDIO_EXPORTS.find((a) => a.value === audioFmt)?.hint} · 48 kHz stereo · mixed straight from the sources, no frames rendered · ${timecode(dur, seq?.fps || 30)} · <b>about ${fmtSize(((AUDIO_EXPORTS.find((a) => a.value === audioFmt)?.kbps || 256) * dur) / 8000)}</b> · saved to <code>${outDir || '…'}</code>` : html`${summary} · ${timecode(dur, seq?.fps || 30)}${estMB != null ? html` · <b>about ${fmtSize(estMB)}</b>` : ''}${format === 'prores4444' ? ' · the sequence background is left transparent' : ''}${!canReview ? ' · not added to Review (only H.264 MP4s play there)' : ''}${o.fps !== 'match' ? ' · the frame rate is converted after rendering (frames repeated or dropped)' : ''} · saved to <code>${outDir || '…'}</code>${preHint ? html`<br />${preHint}` : null}`}</div>
     </div>
   </${Modal}>`;
 }

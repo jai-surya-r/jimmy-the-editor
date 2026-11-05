@@ -210,9 +210,10 @@ async function runJob(spec, job) {
         let p = plan.get(c.id);
         if (!p) plan.set(c.id, p = { box: null, first: i, index: frameIndex(seq, c, t) });
         p.last = i;
-        // a clip inside a nested sequence is also moved by the nested clip: its whole picture, at full size
-        if (tr.track.nest) { p.nested = true; p.box = [0, 0, m.width || seq.width, m.height || seq.height]; continue; }
-        const b = visibleBox(l, transformAt(c, l.localT), m, seq);
+        // a clip inside a nested sequence is drawn into the nest's own picture (the inner sequence's size × scale,
+        // compositor.js), which is then moved as one layer: what it shows of the clip is what lands in that picture
+        const frameOf = tr.track.nest ? { width: tr.track.nest.width, height: tr.track.nest.height } : seq;
+        const b = visibleBox(l, transformAt(c, l.localT), m, frameOf);
         p.box = p.box ? [Math.min(p.box[0], b[0]), Math.min(p.box[1], b[1]), Math.max(p.box[2], b[2]), Math.max(p.box[3], b[3])] : b;
       }
     }
@@ -221,7 +222,7 @@ async function runJob(spec, job) {
     const c = seq.clips.find((x) => x.id === id);
     const m = mediaById[c.media];
     const mw = m.width || seq.width, mh = m.height || seq.height;
-    const factor = p.nested ? 1 : Math.min(1, maxScaleOf(c) * scale);
+    const factor = Math.min(1, maxScaleOf(c) * scale);
     p.w = even(mw * factor);
     p.h = even(mh * factor);
     p.crop = cropBox(p.box, p.w / mw, p.h / mh, p.w, p.h);

@@ -155,6 +155,19 @@ function keyframeExpr(kfs, T, fallback) {
   return `if(lt(${T},${kfs[0].t}),${kfs[0].v},${expr})`;
 }
 
+// A clip's gain at local time T (an ffmpeg expression): volume, keyframes and fades, times those of the nested
+// audio clips it plays through (model.js flattenSequence: clip.gains, each placed on the same timeline).
+function gainExpr(c, T) {
+  let g = keyframeExpr(c.keyframes?.volume, T, c.volume ?? 1);
+  if (c.fadeIn > 0) g += `*min(1,max(0,${T}/${c.fadeIn}))`;
+  if (c.fadeOut > 0) g += `*min(1,max(0,(${c.duration}-${T})/${c.fadeOut}))`;
+  for (const p of c.gains || []) {
+    const d = c.start - p.start;
+    g += `*${gainExpr(p, `(${T}${d < 0 ? '-' : '+'}${Math.abs(d).toFixed(6)})`)}`;
+  }
+  return g;
+}
+
 // One long filter graph with every clip as an input. Exports use mixAudio; this stays as tests/audio-export.mjs's reference.
 export function buildAudioGraph(handle, seq, t0, t1, inputOffset) {
   const mediaById = mediaMap(handle.doc);
@@ -179,9 +192,7 @@ export function buildAudioGraph(handle, seq, t0, t1, inputOffset) {
     const idx = inputOffset + n;
     inputs.push('-ss', srcStart.toFixed(6), '-t', (srcDur + 0.1).toFixed(6), '-i', file);
     const T = `(t+${localStart.toFixed(6)})`;
-    let gain = `${trackById[c.track].volume}*${keyframeExpr(c.keyframes?.volume, T, c.volume ?? 1)}`;
-    if (c.fadeIn > 0) gain += `*min(1,max(0,${T}/${c.fadeIn}))`;
-    if (c.fadeOut > 0) gain += `*min(1,max(0,(${c.duration}-${T})/${c.fadeOut}))`;
+    const gain = `${trackById[c.track].volume}*${gainExpr(c, T)}`;
     parts.push(`[${idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS${atempoChain(speed)},atrim=0:${(b - a).toFixed(6)},volume='${gain}':eval=frame,adelay=${Math.round((a - t0) * 1000)}:all=1[a${n}]`);
     labels.push(`[a${n}]`);
     n++;
@@ -262,9 +273,7 @@ export function batchArgs(bt, out) {
     const speed = c.speed || 1;
     inputs.push('-vn', '-sn', '-dn', '-ss', ((c.in || 0) + localStart * speed).toFixed(6), '-t', ((b - a) * speed + 0.1).toFixed(6), '-i', file);
     const T = `(t+${localStart.toFixed(6)})`;
-    let gain = `${trackGain}*${keyframeExpr(c.keyframes?.volume, T, c.volume ?? 1)}`;
-    if (c.fadeIn > 0) gain += `*min(1,max(0,${T}/${c.fadeIn}))`;
-    if (c.fadeOut > 0) gain += `*min(1,max(0,(${c.duration}-${T})/${c.fadeOut}))`;
+    const gain = `${trackGain}*${gainExpr(c, T)}`;
     // padded, then cut to the exact length: a source that ends early doesn't pull the next clip forward
     parts.push(`[${n}:a]aformat=sample_rates=${MIX_RATE}:channel_layouts=stereo,asetpts=PTS-STARTPTS${atempoChain(speed)},apad=whole_len=${len},atrim=end_sample=${len},volume='${gain}':eval=frame[c${n}]`);
     segs.push(`[c${n}]`);
@@ -430,7 +439,6 @@ const FINISHED = ['done', 'error', 'canceled'];
 const CHUNK_STALL_MS = Number(process.env.JIMMY_CHUNK_STALL_MS) || 180000;
 const WORKER_LOST = 'Render worker disconnected';
 const TEST_FREEZE_CHUNK = process.env.JIMMY_TEST_FREEZE_CHUNK || '';
-export const DRAFT_SHORT_SIDE = 1080;
 
 // ------------------------------------------------------------------ manager
 
@@ -512,9 +520,8 @@ export class RenderManager {
     // a video export may also be made bigger than its sequence (Export › Resolution), up to 8K
     const maxScale = kind === 'video' ? Math.min(4, 8192 / Math.max(seq.width, seq.height)) : 1;
     let scale = Math.max(0.1, Math.min(maxScale, +opts.scale || fit || 1));
-    // drafts are 1080p at most (the frame's shorter side 1080 px): a 4K draft costs far more time and storage and
-    // isn't needed for review. Smaller sequences keep their own size.
-    if (kind === 'video' && quality === 'draft') scale = Math.min(scale, DRAFT_SHORT_SIDE / Math.min(seq.width, seq.height));
+    // a draft is the size asked for (Export › Resolution, the sequence's by default): it differs from High in its
+    // bitrate and encoder speed (QUALITY.draft, gpu.js draft settings), not its size
     const even = (v) => Math.max(2, Math.round(v / 2) * 2);
     const job = {
       id: uid('job'), projectId: handle.id, kind, status: 'queued', progress: 0, eta: null,
@@ -540,7 +547,7 @@ export class RenderManager {
 
   // opts.audio: a key of AUDIO_FORMATS. Starts right away: it needs no render slots, only one ffmpeg.
   createAudio(handle, seq, t0, t1, opts) {
-    const audio = AUDIO_FORMATS[opts.audio] ? opts.audio : 'wav24';
+    const audio = AUDIO_FORMATS[opts.audio] ? opts.audio : 'aac';
     const job = {
       id: uid('job'), projectId: handle.id, kind: 'audio', status: 'running', progress: 0, eta: null,
       sequenceId: seq.id, sequenceName: seq.name, createdAt: Date.now(), startedAt: Date.now(),

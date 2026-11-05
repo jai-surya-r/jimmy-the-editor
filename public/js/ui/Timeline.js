@@ -31,7 +31,7 @@ import { ClipLine, lineDown, propsFor, propLabel, shownProp, showProp } from './
 export const HEAD_W = 176;
 const TRACK_H = { video: 62, audio: 54 };
 const TRACK_MIN = 32, TRACK_MAX = 400;
-const TYPE_ICON = { video: 'film', audio: 'music', image: 'image', text: 'text', solid: 'square' };
+const TYPE_ICON = { video: 'film', audio: 'music', image: 'image', text: 'text', solid: 'square', sequence: 'seq' };
 
 const kindOf = (c) => (c.type === 'audio' ? 'audio' : 'video');
 // a Ctrl+click the clip's line used (curve, keyframe): on a Mac that click is also a right-click, whose menu is skipped
@@ -1042,9 +1042,9 @@ function ClipBox({ clip, x, w, pps, label, selected, flashing, offline, onKf, kf
   // of the last clip extended its tail instead); keep each to a third of the clip
   const edgeW = { width: `${clamp(w / 3, 2, 8)}px` };
   return html`<div class="clip clip-${clip.type} ${selected ? 'is-selected' : ''} ${flashing ? 'is-flash' : ''} ${clip.enabled === false ? 'is-disabled' : ''} ${offline ? 'is-offline' : ''}"
-    data-clip=${clip.id} onDblClick=${clip.type === 'sequence' ? () => tab.setSequence(clip.sequence) : undefined} style=${{ left: `${x}px`, width: `${Math.max(3, w - 1)}px`, '--c': CLIP_COLORS[clip.type] }}>
+    data-clip=${clip.id} onDblClick=${clip.sequence ? () => tab.setSequence(clip.sequence) : undefined} style=${{ left: `${x}px`, width: `${Math.max(3, w - 1)}px`, '--c': CLIP_COLORS[clip.type] }}>
     <div class="clip-label" style=${{ paddingLeft: `${6 + labelPad}px` }}>
-      <${Icon} name=${offline ? 'alert' : TYPE_ICON[clip.type]} size=${11} />
+      <${Icon} name=${offline ? 'alert' : TYPE_ICON[clip.sequence ? 'sequence' : clip.type]} size=${11} />
       <span class="clip-name">${label}</span>
       ${clip.speed && clip.speed !== 1 ? html`<span class="clip-badge">${Math.round(clip.speed * 1000) / 10}%</span>` : null}
       ${fx ? html`<span class="clip-badge">fx</span>` : null}
@@ -1199,7 +1199,7 @@ export function clipMenu(tab, clip) {
       : ids.size > 1 ? { label: 'Link selected', icon: 'link', action: () => tab.apply('Link', (d, ds) => { const l = uid('l'); for (const c of ds.clips) if (ids.has(c.id)) c.link = l; }) } : null,
     linkedIds(tab.seq, [...ids]).size > 1 && new Set(tab.seq.clips.filter((c) => linkedIds(tab.seq, [...ids]).has(c.id)).map((c) => c.link || c.id)).size > 1
       ? { label: 'Synchronize…', icon: 'layers', action: () => openSync(tab, [...ids]) } : null,
-    clip.type === 'sequence' ? { label: 'Open nested sequence', icon: 'seq', action: () => tab.setSequence(clip.sequence) } : null,
+    clip.sequence ? { label: 'Open nested sequence', icon: 'seq', action: () => tab.setSequence(clip.sequence) } : null,
     { label: 'Nest…', icon: 'layers', title: 'Put the selected clips into a new sequence and use it here as one clip', action: async () => {
       const n = await promptText('Nested sequence name', `${tab.seq.name} nest`);
       if (!n) return;

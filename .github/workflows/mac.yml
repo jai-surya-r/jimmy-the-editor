@@ -96,7 +96,7 @@ jobs:
           tests/mac-disk.mjs tests/scheduler.mjs tests/chat-tasks.mjs tests/chat-paths.mjs tests/clip-names.mjs
           tests/xml-timecode.mjs tests/template-files.mjs tests/export-folder.mjs tests/audio-export.mjs
           tests/proxy-duplicate.mjs tests/project-close.mjs "npm run golden" tests/export-options.mjs
-          tests/transcripts.mjs tests/check-image.mjs tests/motion-signature.mjs
+          tests/transcripts.mjs tests/check-image.mjs tests/motion-signature.mjs tests/nest-audio.mjs tests/nest-audio-export.mjs
       - name: Desktop app tests (this repo's Electron)
         if: always()
         env:

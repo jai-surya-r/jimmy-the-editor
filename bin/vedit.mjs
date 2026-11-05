@@ -174,7 +174,7 @@ const commands = {
         const clips = s.clips.filter((c) => c.track === tr.id).sort((a, b) => a.start - b.start);
         console.log(`  ${trackLabel(s, tr)} (track id "${tr.id}")${flags ? `  [${flags}]` : ''}${clips.length ? '' : '  — empty'}`);
         for (const c of clips) {
-          const what = c.type === 'text' ? JSON.stringify(c.text) : c.type === 'solid' ? `color ${c.color}` : media[c.media]?.name || `missing media ${c.media}`;
+          const what = c.type === 'text' ? JSON.stringify(c.text) : c.type === 'solid' ? `color ${c.color}` : c.sequence ? `nested ${c.sequence}${c.type === 'audio' ? ' (sound)' : ''}` : media[c.media]?.name || `missing media ${c.media}`;
           const x = [];
           if (c.in) x.push(`in ${f2(c.in)}`);
           if (c.speed && c.speed !== 1) x.push(`speed ${c.speed}`);
@@ -292,7 +292,7 @@ const commands = {
     if (typeof opts.range === 'string') { const [a, b] = opts.range.split('-').map(Number); range = [a, b]; }
     else if (opts.inout) range = 'inout';
     // Quick by default: Claude's review renders shouldn't take long. "auto" lets the editor pick — full quality
-    // when the sequence is already pre-rendered (the export is then mostly a stitch), a draft (1080p at most)
+    // when the sequence is already pre-rendered (the export is then mostly a stitch), a draft (low bitrate)
     // otherwise. --final (or --quality high) always gives the real export; --draft always a draft.
     // Delivery settings (the Export dialog's): any of them makes it a full-quality export unless a quality is given.
     const FORMATS = ['h264', 'hevc', 'prores', 'prores422', 'proreslt', 'proresproxy', 'prores4444o', 'prores4444'];

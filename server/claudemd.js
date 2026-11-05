@@ -53,7 +53,7 @@ Only in a Claude session started outside the editor run \`${cli} <command>\` fro
   The PNG is check-sized (540p: 960×540, or 540×960 for vertical); add \`--full\` only when you must inspect fine detail at full resolution
 - \`vedit render [--seq <id>] [--range 5-12.5]\` — export a quick review MP4; it becomes a new review version. The editor
   pre-renders the sequences the user turned pre-rendering on for, so this is full quality when that is ready and a quicker **draft** otherwise.
-  Drafts are at most 1080p (a 4K sequence drafts at 1920×1080; smaller sequences keep their size); that is automatic, never ask for more.
+  A draft is the sequence's size at a low bitrate; that is automatic, never ask for more.
   Always render this way. Only add \`--final\` (always full quality, can be slow) when the user explicitly asks for a final/high-quality export
 - \`vedit comments [--open] [--version v3]\` — review comments with timecodes
 - \`vedit reply <commentId> "text" [--resolve]\` — answer and/or resolve a review comment. Keep a reply to one short line
@@ -108,8 +108,10 @@ changing a composition** — it has the authoring rules (params, virtual time, a
   - \`text\`: \`{ "type": "text", "text": "Line one\\nLine two", "style": { … } }\`
   - \`solid\`: \`{ "type": "solid", "color": "#ff0055" }\` — a full-frame colour matte.
   - \`sequence\` (nested sequence): \`{ "type": "sequence", "sequence": "s_…", "track": "v2", "start", "duration", "in" }\` — plays
-    that sequence's picture and sound (\`in\` = where in it the clip starts); it has its own transform/effects/transitions like
-    any clip. Never nest a sequence inside itself.
+    that sequence's picture (\`in\` = where in it the clip starts); it has its own transform/effects/transitions like
+    any clip. Its sound is one linked audio clip: \`{ "type": "audio", "sequence": "s_…", "track": "a1", "start", "duration", "in",
+    "volume", "link" }\` (same start/duration/in and \`link\` as the picture clip, which has \`"audioClip": true\`); its volume,
+    fades and track gain the whole nested mix. Never nest a sequence inside itself.
   - \`adjust\` (adjustment layer): \`{ "type": "adjust", "below": { "x": 0, "y": 0, "scale": 1.2, "rotation": 0 } }\` — moves,
     zooms and turns everything on the tracks under it (keyframe as \`belowX\`, \`belowY\`, \`belowScale\`, \`belowRotation\`; its
     effects apply to it too). Its own \`transform\`/\`crop\` set where that applies (full frame by default) and its opacity mixes it in.
