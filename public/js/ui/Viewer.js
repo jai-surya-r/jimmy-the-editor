@@ -93,7 +93,9 @@ export function Viewer({ tab, readOnly = false, children = null }) {
   const pxW = Math.max(1, Math.round(Math.min(cssW * dpr, sw * cap)));
   const pxH = Math.max(1, Math.round(pxW * (sh / sw)));
   live.current = { ...live.current, readOnly, z, cssW, cssH, pxW, pxH, dpr, safe, zMax, fit, sw, sh, view };
-  useEffect(() => tab.engine.wake(), [pxW, pxH, z, safe, readOnly]); // a new size or zoom: draw again
+  // a new size or zoom: draw again. After the canvas took its new size (which clears it): a frame drawn by the loop
+  // just before, at the old size, would otherwise be all there is, and a paused preview stayed blank
+  useEffect(() => tab.engine.invalidate(120), [pxW, pxH, z, safe, readOnly]);
 
   // --- render loop
   useEffect(() => {
