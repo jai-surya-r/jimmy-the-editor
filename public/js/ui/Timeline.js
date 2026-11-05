@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { useStore, loadPref, savePref } from '../core/store.js';
 import {
   clipEnd, videoTracks, audioTracks, trackLabel, sequenceDuration, snapTime, maxDurationFor, usesSourceTime,
-  uid, clipsOnTrack, isVisualClip, timecode, TRANSITIONS, clamp, deepClone, findSequence,
+  uid, clipsOnTrack, isVisualClip, timecode, TRANSITIONS, clamp, deepClone, findSequence, LABEL_COLORS,
 } from '../core/model.js';
 import {
   clearRange, linkedIds, splitAt, deleteClips, trimHead, insertMedia, addTrack, addText, addSolid, pasteClips, addAdjust, insertSequence, nestClips,
@@ -1042,7 +1042,7 @@ function ClipBox({ clip, x, w, pps, label, selected, flashing, offline, onKf, kf
   // of the last clip extended its tail instead); keep each to a third of the clip
   const edgeW = { width: `${clamp(w / 3, 2, 8)}px` };
   return html`<div class="clip clip-${clip.type} ${selected ? 'is-selected' : ''} ${flashing ? 'is-flash' : ''} ${clip.enabled === false ? 'is-disabled' : ''} ${offline ? 'is-offline' : ''}"
-    data-clip=${clip.id} onDblClick=${clip.sequence ? () => tab.setSequence(clip.sequence) : undefined} style=${{ left: `${x}px`, width: `${Math.max(3, w - 1)}px`, '--c': CLIP_COLORS[clip.type] }}>
+    data-clip=${clip.id} onDblClick=${clip.sequence ? () => tab.setSequence(clip.sequence) : undefined} style=${{ left: `${x}px`, width: `${Math.max(3, w - 1)}px`, '--c': LABEL_COLORS[clip.label] || CLIP_COLORS[clip.type] }}>
     <div class="clip-label" style=${{ paddingLeft: `${6 + labelPad}px` }}>
       <${Icon} name=${offline ? 'alert' : TYPE_ICON[clip.sequence ? 'sequence' : clip.type]} size=${11} />
       <span class="clip-name">${label}</span>
@@ -1207,6 +1207,7 @@ export function clipMenu(tab, clip) {
       tab.apply('Nest', (d, ds) => { made = nestClips(d, ds, [...linkedIds(ds, [...ids])], n.trim()); return made ? undefined : false; });
       if (made) { tab.ui.set({ selection: [made.clip.id], focusClip: made.clip.id }); notify(`Nested into "${made.sequence.name}". Double-click it to open it`, 'success'); }
     } },
+    { label: 'Label', items: labelItems(tab, ids, clip) },
     { label: 'Rename…', icon: 'edit', action: async () => { const n = await promptText('Clip name', clip.name || clipLabel(clip, tab.mediaById, tab.doc)); if (n != null) tab.apply('Rename clip', (d, ds) => { ds.clips.find((c) => c.id === clip.id).name = n; }); } },
     media ? { label: 'Reveal in bin', icon: 'folder', action: () => tab.ui.set({ binSelection: [media.id], binReveal: Date.now() }) } : null,
     { separator: true },
@@ -1215,6 +1216,21 @@ export function clipMenu(tab, clip) {
     { label: 'Ripple trim previous edit to playhead', shortcut: shortcutLabel('tl.trimPrev'), action: () => rippleTrimPlayhead(tab, 'prev') },
     { label: 'Ripple trim next edit to playhead', shortcut: shortcutLabel('tl.trimNext'), action: () => rippleTrimPlayhead(tab, 'next') },
   ].filter(Boolean);
+}
+
+// Right-click › Label: a colour for the selected clips (and the clips linked to them), or back to their type's colour
+const LABEL_NAMES = { violet: 'Violet', iris: 'Iris', caribbean: 'Caribbean', lavender: 'Lavender', cerulean: 'Cerulean', forest: 'Forest',
+  rose: 'Rose', mango: 'Mango', purple: 'Purple', blue: 'Blue', teal: 'Teal', magenta: 'Magenta', tan: 'Tan', green: 'Green', brown: 'Brown', yellow: 'Yellow' };
+function labelItems(tab, ids, clip) {
+  const set = (label) => tab.apply(label ? `Label ${LABEL_NAMES[label]}` : 'Remove label', (d, ds) => {
+    const all = linkedIds(ds, [...ids]);
+    for (const c of ds.clips) if (all.has(c.id)) { if (label) c.label = label; else delete c.label; }
+  });
+  return [
+    { label: 'None (by type)', swatch: '', checked: !clip.label, action: () => set(null) },
+    { separator: true },
+    ...Object.keys(LABEL_COLORS).map((k) => ({ label: LABEL_NAMES[k], swatch: LABEL_COLORS[k], checked: clip.label === k, action: () => set(k) })),
+  ];
 }
 
 // Shared by the sequence tab menu, the bin and the export dialog.

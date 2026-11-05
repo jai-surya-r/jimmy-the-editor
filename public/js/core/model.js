@@ -16,6 +16,12 @@ export const REVIEWS_FORMAT = 'claude-edit-reviews/1';
 // sequence: a nested sequence (clip.sequence = its id), played and rendered as its contents (flattenSequence);
 // adjust: an adjustment layer: moves and treats everything below it (clip.below), within its own area (clip.transform)
 export const CLIP_TYPES = ['video', 'audio', 'image', 'text', 'solid', 'sequence', 'adjust'];
+// Label colours (Premiere's sixteen): clip.label names one; the timeline draws the clip in it instead of its type's
+export const LABEL_COLORS = {
+  violet: '#a990dd', iris: '#7d82dd', caribbean: '#1db398', lavender: '#e384e3', cerulean: '#1d9bd3', forest: '#51883a',
+  rose: '#f45b8e', mango: '#f89d33', purple: '#9b3eb0', blue: '#2f5ec9', teal: '#2c8c8c', magenta: '#e3317b',
+  tan: '#ceb582', green: '#3da34a', brown: '#8e5a2b', yellow: '#e5d33a',
+};
 export const FX_PROPS = ['brightness', 'contrast', 'saturation', 'hue', 'grayscale', 'blur'];
 export const CROP_PROPS = { cropLeft: 'left', cropTop: 'top', cropRight: 'right', cropBottom: 'bottom' };
 // an adjustment layer's transform of the layers below it (clip.below), keyframed as these
@@ -720,6 +726,7 @@ export function normalizeClip(c, ctx) {
   out.enabled = c.enabled !== false;
   out.link = c.link ? str(c.link) : null;
   out.name = str(c.name, '');
+  if (c.label != null) { if (LABEL_COLORS[c.label]) out.label = c.label; else delete out.label; }
   if (track && (track.kind === 'audio') !== (type === 'audio')) {
     warnings.push(`clip ${id}: ${type} clip is on ${track.kind} track "${track.id}"`);
   }
@@ -874,6 +881,7 @@ const allDefault = (o, d) => Object.keys(d).every((k) => (o?.[k] ?? d[k]) === d[
 
 function serializeClip(c) {
   const o = { ...c };
+  if (!o.label) delete o.label;
   if (o.enabled !== false) delete o.enabled;
   if (!o.link) delete o.link;
   if (!o.name) delete o.name;

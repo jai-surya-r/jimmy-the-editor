@@ -3,7 +3,7 @@
 // attachments, timeline context, permission mode and model.
 // Sessions live outside Preact (one per project) so they survive tab switches.
 import { html, Icon } from './common.js';
-import { Component } from 'preact';
+import { Component, render } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { createStore, useStore, loadPref, savePref } from '../core/store.js';
 import { get, post } from '../core/api.js';
@@ -254,12 +254,21 @@ const resultImages = (r) => (Array.isArray(r?.content) ? r.content : [])
   .filter((b) => b.type === 'image' && b.source?.type === 'base64')
   .map((b) => { let u = imgUrls.get(b); if (!u) { u = `data:${b.source.media_type};base64,${b.source.data}`; imgUrls.set(b, u); } return u; });
 
+// A picture at full size over the whole window (click or Esc closes it). Drawn outside the chat: a chat row is
+// contained (content-visibility, so rows out of view cost nothing), and a fixed overlay inside one only covered the row.
+export function openLightbox(src) {
+  const el = document.createElement('div');
+  document.body.appendChild(el);
+  const close = () => { removeEventListener('keydown', onKey, true); render(null, el); el.remove(); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); } };
+  addEventListener('keydown', onKey, true);
+  render(html`<div class="cc-lightbox" onClick=${close}><img src=${src} /></div>`, el);
+}
+
 // images Claude looked at (frames, stills, references), shown under the step; click for full size
 function ResultImages({ urls }) {
-  const [zoom, setZoom] = useState(null);
   if (!urls.length) return null;
-  return html`<div class="cc-tool-imgs">${urls.map((u) => html`<img src=${u} onClick=${() => setZoom(u)} title="Click to enlarge" />`)}
-    ${zoom ? html`<div class="cc-lightbox" onClick=${() => setZoom(null)}><img src=${zoom} /></div>` : null}</div>`;
+  return html`<div class="cc-tool-imgs">${urls.map((u) => html`<img src=${u} onClick=${() => openLightbox(u)} title="Click to enlarge" />`)}</div>`;
 }
 
 function Diff({ input }) {

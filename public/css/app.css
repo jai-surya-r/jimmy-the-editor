@@ -257,6 +257,8 @@ textarea.input { height: auto; padding: 8px 10px; resize: vertical; }
 .menu-item.is-disabled { opacity: 0.4; cursor: default; background: none; }
 .menu-item.is-danger { color: #ff8ea0; }
 .menu-check { width: 18px; display: grid; place-items: center; color: var(--text-2); }
+.menu-swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; margin-right: 2px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+.menu-swatch.is-none { box-shadow: inset 0 0 0 1px var(--line-2, rgba(255, 255, 255, 0.3)); background: repeating-linear-gradient(135deg, transparent 0 3px, rgba(255, 255, 255, 0.25) 3px 4px) !important; }
 .menu-label { flex: 1; }
 .menu-kbd { color: var(--muted); font-size: 11px; font-family: var(--mono); margin-left: 18px; }
 .menu-sep { height: 1px; background: var(--line); margin: 4px 6px; }

@@ -249,6 +249,7 @@ function MenuList({ items, x, y, onDone, sub }) {
         onPointerEnter=${(e) => setOpen(hasSub ? { i, rect: e.currentTarget.getBoundingClientRect() } : null)}
         onClick=${() => { if (it.disabled || hasSub) return; onDone(); it.action?.(); }}>
         <span class="menu-check">${it.checked ? html`<${Icon} name="check" size=${13} />` : it.icon ? html`<${Icon} name=${it.icon} size=${14} />` : null}</span>
+        ${it.swatch !== undefined ? html`<span class="menu-swatch ${it.swatch ? '' : 'is-none'}" style=${{ background: it.swatch || 'transparent' }}></span>` : null}
         <span class="menu-label">${it.label}</span>
         ${it.shortcut ? html`<span class="menu-kbd">${it.shortcut}</span>` : null}
         ${hasSub ? html`<${Icon} name="next" size=${13} />` : null}

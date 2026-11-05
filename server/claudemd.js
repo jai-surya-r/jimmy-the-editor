@@ -117,6 +117,8 @@ changing a composition** — it has the authoring rules (params, virtual time, a
     effects apply to it too). Its own \`transform\`/\`crop\` set where that applies (full frame by default) and its opacity mixes it in.
     The way to do punch-ins and slow zooms over several clips at once.
   - Any clip: \`"enabled": false\` = disabled by the user (Shift+E): kept on the timeline but not seen, heard or exported.
+  - Any clip: \`"label": "violet"\` = the label colour the user gave it on the timeline (violet, iris, caribbean, lavender,
+    cerulean, forest, rose, mango, purple, blue, teal, magenta, tan, green, brown, yellow). Keep it when editing the clip.
 - Visual clips (video/image/text/solid) can have:
   - \`transform\`: \`{ "x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1, "flipH", "flipV" }\` — x/y are pixel offsets of the
     layer centre from the frame centre (+y = down); scale 1 = native media pixels. Example: fill a 1080×1920 frame with
