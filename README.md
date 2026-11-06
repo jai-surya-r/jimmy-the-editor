@@ -4,8 +4,10 @@ A local video editor built around Claude. Every project is a folder holding a `p
 
 ## Install and start
 
-- **Windows:** run `Jimmy-The-Editor-Setup-<version>.exe` (made by `npm run dist`), then open **Jimmy - The Editor** from the Start menu.
-- **macOS:** open the dmg for your Mac (`-mac-arm64` for Apple silicon, `-mac-x64` for Intel; built by the `mac` workflow on GitHub), drag the app to Applications, and the first time right-click it › **Open** (the app isn't notarized by Apple).
+Download it from [Releases](https://github.com/jai-surya-r/jimmy-the-editor/releases/latest).
+
+- **Windows:** run `Jimmy-The-Editor-Setup-<version>.exe`, then open **Jimmy - The Editor** from the Start menu. It isn't signed: if Windows says it protected your PC, click **More info › Run anyway**.
+- **macOS:** open the dmg for your Mac (`-mac-arm64` for Apple silicon, `-mac-x64` for Intel) and drag the app to Applications. It isn't notarized by Apple: the first time, macOS won't open it; go to System Settings › Privacy & Security and click **Open Anyway**.
 - The app brings its own ffmpeg and browser engine. For the built-in Claude chats and terminal, install [Claude Code](https://claude.com/claude-code) and sign in from Settings › Accounts.
 - Everything stays on this computer: the editor talks to its own server on 127.0.0.1 only.
 - Projects live in the app's data folder by default. You can also open any folder with **Open folder…**
