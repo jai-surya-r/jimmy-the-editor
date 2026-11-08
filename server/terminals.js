@@ -9,6 +9,7 @@ let pty = null;
 let ptyError = null;
 try { pty = (await import('@lydell/node-pty')).default; } catch (err) { ptyError = err; console.warn('[terminal] not available:', String(err.message).split('\n')[0]); }
 import { APP_DIR, sleep, scriptEnv } from './util.js';
+import { agentPath } from './agents.js';
 import { applyConfigDir, SESSION_VARS } from './accounts.js';
 import { sessionSettingsFile } from './claudehooks.js';
 import { lastSession } from './chathistory.js';
@@ -77,7 +78,7 @@ export class TerminalManager {
       CLAUDE_EDIT_PROJECT: projectId,
       ...scriptEnv(),
       // ~/.local/bin is where Claude Code's installer puts it; included in case PATH wasn't updated
-      PATH: [binDir, process.env.PATH || process.env.Path || '', path.join(os.homedir(), '.local', 'bin')].join(path.delimiter),
+      PATH: [binDir, agentPath()].join(path.delimiter),
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
     };

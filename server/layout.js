@@ -71,6 +71,7 @@ function lookLayout(dir, F = syncFs) {
       refs: path.join(dir, '1_Assets', '5_Screenshot'),
       motion: path.join(dir, '1_Assets', '4_Overlays'), // motion-graphic HTML sources (no new folders in Jimmy's template)
       motionRenders: afterEffectsExports(dir, F), // rendered motion graphics stay in the project, with the After Effects renders
+      afterEffects: afterEffectsProjects(dir, F), // After Effects projects (motion graphics converted by Claude)
       proxyFile: (abs, ext) => rollProxy(dir, abs, ext),
       files, // the editor's own files for this project: UI state, chat links, review rounds
       legacy: { motionRenders: path.join(state, 'motion-renders'), files: state }, // where earlier versions kept them
@@ -87,6 +88,7 @@ function lookLayout(dir, F = syncFs) {
     refs: path.join(dir, 'media'),
     motion: path.join(dir, 'motion'),
     motionRenders: path.join(dir, 'motion', 'renders'),
+    afterEffects: path.join(dir, 'after-effects'),
     state: path.join(dir, '.claude-edit'),
     files: path.join(dir, '.claude-edit'),
     cache: path.join(dir, '.cache'),
@@ -115,6 +117,12 @@ function afterEffectsExports(dir, F = syncFs) {
   const root = path.join(dir, '3_Exports');
   const names = F.folders(root);
   return path.join(root, names.find((n) => /^(\d+[ _]?)?after[ _]?effects[ _]?exports?$/i.test(n)) || '1_After_Effects_Exports');
+}
+
+// The template's After Effects projects folder (5_Projects/3_After Effects, any spelling); 3_After_Effects if it has none.
+function afterEffectsProjects(dir, F = syncFs) {
+  const root = path.join(dir, '5_Projects');
+  return path.join(root, F.folders(root).find((n) => /^(\d+[ _]?)?after[ _]?effects$/i.test(n)) || '3_After_Effects');
 }
 
 // Footage in 4_Footage/A_Roll or B_Roll (any spelling) gets its proxy in that roll's Proxies folder, in the same

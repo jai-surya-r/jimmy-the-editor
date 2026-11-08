@@ -55,7 +55,7 @@ export async function startServer({ env = {}, log = path.join(WORK, 'server.log'
   const [exe, args] = APP_EXE ? [APP_EXE, visible ? [] : ['--hidden']] : APP ? [createRequire(import.meta.url)('electron'), ['.', ...(visible ? [] : ['--hidden'])]] : [process.execPath, ['server/index.js', '--stay']];
   const proc = spawn(exe, args, {
     cwd: ROOT, stdio: ['ignore', out, out],
-    env: { ...process.env, CLAUDE_EDIT_PORT: String(PORT), TEMP: tmp, TMP: tmp, TMPDIR: tmp, ...(APP ? { JIMMY_DATA_DIR: path.join(WORK, 'app-data') } : {}), ...env },
+    env: { ...process.env, CLAUDE_EDIT_PORT: String(PORT), TEMP: tmp, TMP: tmp, TMPDIR: tmp, JIMMY_NO_WELCOME: '1', ...(APP ? { JIMMY_DATA_DIR: path.join(WORK, 'app-data') } : {}), ...env },
   });
   let exited = false;
   proc.on('exit', (code, sig) => { exited = true; try { fs.writeSync(out, `\n[test harness] the app exited (code ${code}, signal ${sig})\n`); } catch { /* closed */ } });

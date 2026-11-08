@@ -345,7 +345,7 @@ function BackgroundTask({ task, onStop }) {
 
 // the account's usage windows (from Claude Code's rate-limit reports)
 const WINDOW_LABELS = { five_hour: 'Session', seven_day: 'Week', seven_day_opus: 'Week (Opus)', seven_day_sonnet: 'Week (Sonnet)' };
-function Limits({ limits }) {
+export function Limits({ limits }) {
   const w = limits?.unifiedWindows;
   if (!w) return null;
   const fmt = (sec) => {
@@ -353,25 +353,35 @@ function Limits({ limits }) {
     const mins = Math.max(1, Math.round((d - Date.now()) / 60000));
     return mins < 24 * 60 ? `resets in ${mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`}` : `resets ${d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`;
   };
-  return html`<div class="cc-limits">${Object.entries(w).filter(([, v]) => !v.resetsAt || v.resetsAt * 1000 > Date.now()).map(([k, v]) => {
+  // Ultra plans have no 5-hour session limit, only the week (a window without a reset time isn't a limit either)
+  const ultra = /ultra/i.test(limits.plan || '');
+  const shown = Object.entries(w).filter(([k, v]) => !(k === 'five_hour' && (ultra || !v.resetsAt)) && (!v.resetsAt || v.resetsAt * 1000 > Date.now()));
+  const short = (sec) => { const mins = Math.max(1, Math.round((sec * 1000 - Date.now()) / 60000)); return mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`; };
+  // Claude Code reports "allowed_warning" once a window passes a threshold (75%, 90%…): close to the limit, still
+  // working. Only "rejected" means the limit is reached and Claude stops until the reset.
+  const hit = limits.status === 'rejected';
+  const near = !hit && limits.status === 'allowed_warning';
+  const which = { five_hour: '5-hour session', seven_day: 'weekly', seven_day_opus: 'weekly Opus', seven_day_sonnet: 'weekly Sonnet' }[limits.rateLimitType] || 'usage';
+  return html`<div class="cc-limits">${shown.map(([k, v]) => {
     const pct = Math.round((v.utilization || 0) * 100);
     return html`<div class=${`cc-limit ${pct >= 90 ? 'is-high' : pct >= 70 ? 'is-mid' : ''}`} title=${`${WINDOW_LABELS[k] || k}: ${pct}% used, ${fmt(v.resetsAt)}`}>
-      <span>${WINDOW_LABELS[k] || k}</span><span class="cc-limit-bar"><i style=${{ width: `${Math.min(100, pct)}%` }}></i></span><span>${pct}%</span></div>`;
-  })}${limits.status && limits.status !== 'allowed' ? html`<div class="cc-limit is-high">Limit reached · ${fmt(limits.resetsAt)}</div>` : null}</div>`;
+      <span>${WINDOW_LABELS[k] || k}</span><span class="cc-limit-bar"><i style=${{ width: `${Math.min(100, pct)}%` }}></i></span><span>${pct}%</span>
+      ${k === 'five_hour' && v.resetsAt ? html`<span class="cc-limit-reset">resets in ${short(v.resetsAt)}</span>` : null}</div>`;
+  })}${hit ? html`<div class="cc-limit is-high">${which[0].toUpperCase()}${which.slice(1)} limit reached · ${fmt(limits.resetsAt)}</div>`
+    : near ? html`<div class="cc-limit is-mid" title=${`Close to the ${which} limit: Claude keeps working, this is an early warning. ${fmt(limits.resetsAt)}`}>Near limit</div>` : null}</div>`;
 }
 
 // How long the conversation is. Claude re-reads all of it on every step, so a long chat uses the
-// account's limit much faster; past CONTEXT_WARN the panel offers to shrink it or start over.
-const CONTEXT_WARN = 150000, CONTEXT_HIGH = 300000;
-// A cold cache only matters when there's a sizeable chat to send again.
-const COLD_WARN = 50000;
-function Context({ info, busy, running, onCompact, onNew }) {
+// account's limit faster. Compacting pays off when the cache is cold (the next message re-sends everything at full
+// price anyway): offered from COLD_WARN. While the cache is warm, re-reading costs about a tenth and compacting would
+// throw that away: offered only from WARM_WARN. The bar is scaled to CONTEXT_HIGH.
+const COLD_WARN = 150000, WARM_WARN = 500000, CONTEXT_HIGH = 700000;
+export function Context({ info, busy, running, onCompact, onNew }) {
   // the cache countdown moves on its own: redraw every 30 s
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 30000); return () => clearInterval(t); }, []);
   const n = info?.context;
   if (!n) return null;
-  const level = n >= CONTEXT_HIGH ? 'is-high' : n >= CONTEXT_WARN ? 'is-mid' : '';
   const win = info.contextWindow ? ` of ${tokens(info.contextWindow)}` : '';
   const tip = `This chat is ${tokens(n)} tokens long${win}. Claude re-reads the whole chat on every step, so each step now uses about that much of your usage limit. Compact replaces the chat with a short summary; New chat starts fresh.`;
   // Cache: after each step the API keeps the chat cached for a while (1 hour for Claude Code), and re-reading a
@@ -384,6 +394,7 @@ function Context({ info, busy, running, onCompact, onNew }) {
     ? `Cache warm: Claude re-reads this chat at about a tenth of the normal cost. It stays warm for ${Math.round(ttl / 60000)} min after each step${busy ? '' : ` (about ${mins} min left)`}.`
     : `Cache cold: it's been over ${Math.round(ttl / 60000)} min since the last step, so your next message sends the whole chat (about ${tokens(n)} tokens) again at full price. Compact or start a new chat if you're moving on to something else.`;
   const cold = !warm && info.lastCallAt && n >= COLD_WARN;
+  const level = n >= CONTEXT_HIGH ? 'is-high' : n >= (warm ? WARM_WARN : COLD_WARN) ? 'is-mid' : '';
   const actions = html`
       <button class="link-btn" disabled=${busy || !running} title=${!running ? 'The chat has ended: start a new one' : busy ? 'Wait for Claude to finish, or press Esc' : 'Replace the chat with a short summary and keep going'} onClick=${onCompact}>Compact</button>
       <button class="link-btn" title="Start a fresh chat for the next task" onClick=${onNew}>New chat</button>`;

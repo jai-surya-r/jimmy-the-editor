@@ -24,6 +24,7 @@ import { keymap, shortcutLabel } from './keymap.js';
 import { toolCursor } from './cursors.js';
 import { openReframe } from './reframe.js';
 import { openSync } from './sync.js';
+import { motionClips, askConvertToAE, hasAfterEffects } from './aeconvert.js';
 import { AudioMeter } from './AudioMeter.js';
 import { noteWheel } from '../core/perf.js';
 import { ClipLine, lineDown, propsFor, propLabel, shownProp, showProp } from './cliplines.js';
@@ -1207,6 +1208,13 @@ export function clipMenu(tab, clip) {
       tab.apply('Nest', (d, ds) => { made = nestClips(d, ds, [...linkedIds(ds, [...ids])], n.trim()); return made ? undefined : false; });
       if (made) { tab.ui.set({ selection: [made.clip.id], focusClip: made.clip.id }); notify(`Nested into "${made.sequence.name}". Double-click it to open it`, 'success'); }
     } },
+    ...(() => {
+      // motion graphics: Claude rebuilds the selected ones (or this one) as an After Effects project
+      const mg = hasAfterEffects() ? motionClips(tab, ids.has(clip.id) ? ids : new Set([clip.id])) : [];
+      return mg.length ? [{ label: `Ask Claude: convert ${mg.length > 1 ? `${mg.length} graphics` : ''} to AE project`.replace('  ', ' '), icon: 'sparkle',
+        title: 'Claude rebuilds them as After Effects comps (layers and keyframes) and saves the .aep in the project\'s After Effects folder',
+        action: () => askConvertToAE(tab, new Set(mg.map((c) => c.id))) }] : [];
+    })(),
     { label: 'Label', items: labelItems(tab, ids, clip) },
     { label: 'Rename…', icon: 'edit', action: async () => { const n = await promptText('Clip name', clip.name || clipLabel(clip, tab.mediaById, tab.doc)); if (n != null) tab.apply('Rename clip', (d, ds) => { ds.clips.find((c) => c.id === clip.id).name = n; }); } },
     media ? { label: 'Reveal in bin', icon: 'folder', action: () => tab.ui.set({ binSelection: [media.id], binReveal: Date.now() }) } : null,

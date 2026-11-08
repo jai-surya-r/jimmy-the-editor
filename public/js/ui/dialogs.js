@@ -11,6 +11,7 @@ import { useStore } from '../core/store.js';
 import { openStorage } from './storage.js';
 import { openShortcuts } from './shortcuts.js';
 import { openAccounts } from './accounts.js';
+import { SetupDialog, startTour } from './welcome.js';
 
 // ------------------------------------------------------------------ prompt / confirm
 
@@ -500,6 +501,12 @@ export function SettingsDialog({ close, init }) {
       setTimeout(() => window.close(), 300);
     }}>Quit Jimmy</${Button}><div class="spacer"></div><${Button} onClick=${() => close(null)}>Cancel</${Button}><${Button} kind="primary" onClick=${save}>Save</${Button}>`}>
     <div class="form">
+      <div class="field"><span>Getting started</span>
+        <div class="field-row" style=${{ gap: '6px', flexWrap: 'wrap' }}>
+          <${Button} icon="sparkle" title="A short walk through the screen: what each part does and what it can't" onClick=${() => { close(null); startTour(document.querySelector('.panel.timeline') ? 'editor' : 'home'); }}>Show the tour</${Button}>
+          <${Button} icon="terminal" title="Install or sign in to Claude Code or Codex" onClick=${() => { const back = stepAside(); close(null); openDialog(SetupDialog, { then: back }); }}>Claude Code & Codex setup…</${Button}>
+        </div>
+      </div>
       <div class="field"><span>Theme</span><${ThemePicker} value=${theme} onChange=${setTheme} /></div>
       <div class="field"><span>Default Claude account for new projects</span>
         <div class="field-row" style=${{ gap: '6px' }}>

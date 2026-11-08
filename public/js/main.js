@@ -5,6 +5,7 @@ import { socket } from './core/api.js';
 import { restoreTabs, loadServerState, openProject, activate, getTab, activeTab, app } from './core/app.js';
 import { initTheme } from './core/theme.js';
 import { startPerf, registerStats } from './core/perf.js';
+import { firstRun } from './ui/welcome.js';
 
 initTheme();
 startPerf();
@@ -13,6 +14,7 @@ socket.connect();
 loadServerState();
 restoreTabs();
 render(html`<${App} />`, document.getElementById('app'));
+firstRun(); // a new user: agent setup and the tour (ui/welcome.js)
 // for tests that drive the editor (tests/perf-day.mjs)
 window.__jimmy = { openProject, activate, getTab, activeTab, app };
 // for the performance recorder: each tab's player (video/audio/image elements held) and undo depth

@@ -111,7 +111,7 @@ jobs:
           tests/export-name.mjs tests/settings-save.mjs tests/bin-views.mjs tests/organise.mjs
           tests/gap-select.mjs tests/review-clear.mjs tests/snapshots.mjs tests/reframe.mjs tests/sync.mjs
           tests/nest-adjust.mjs tests/chat-stop.mjs tests/chat-speed.mjs tests/claude-priority.mjs tests/step82.mjs tests/layout.mjs
-          tests/heavy-ui.mjs tests/labels-lightbox.mjs
+          tests/heavy-ui.mjs tests/labels-lightbox.mjs tests/welcome.mjs tests/limits-ae.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -19,6 +19,7 @@ import { PrerenderManager } from './prerender.js';
 import { listSnapshots, takeSnapshot, restoreSnapshot } from './snapshots.js';
 import { getTranscript, saveTranscript } from './transcripts.js';
 import { audioLag } from './audiosync.js';
+import { agentStatus, installAgent, installJob, startCodexLogin, codexLoginState, afterEffectsApp } from './agents.js';
 import { listAccounts, addProfile, removeProfile, startLogin, getLogin, sendLoginCode, cancelLogin, cancelAllLogins, signOut } from './accounts.js';
 import { MotionService, MOTION_CDNS, injectRuntime, decodeCfg, readConfigBlock, mergedParams, runtimeFile } from './motion.js';
 import { parseCodeValues, parseCssVars, applyCodeValues } from './motionparse.js';
@@ -320,6 +321,8 @@ route('POST', '/api/p/:id/close', async (req, { id }) => {
 route('POST', '/api/perf', async (req) => { const b = await readJsonBody(req); perflog.fromEditor(b.client, b.items); return { ok: true }; });
 route('GET', '/api/state', async () => ({
   app: 'claude-edit', version: '0.1.0', port: PORT, desktop: IN_ELECTRON, projectsRoot: getConfig().projectsRoot,
+  afterEffects: afterEffectsApp(), // Adobe After Effects here: the clip menu offers "convert to AE project" only then
+  welcome: !process.env.JIMMY_NO_WELCOME, // first-start setup and tour (off in the test runs that don't test them)
   ffmpeg: !!FFMPEG, appDir: toPosix(APP_DIR), platform: process.platform, home: os.homedir(),
   claudeProfiles: listClaudeProfiles(), claudeConfigDir: getConfig().claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || null,
   proxyMode: getConfig().proxy?.mode || 'auto',
@@ -436,6 +439,8 @@ route('POST', '/api/storage/clear', async (req) => {
   return { ok: true };
 });
 
+// where this project keeps After Effects projects (relative to its folder), for "convert to AE project"
+route('GET', '/api/p/:id/ae-folder', async (_req, { id }) => { const h = await needProject(id); return { rel: toPosix(path.relative(h.dir, h.layout.afterEffects)), template: !!h.layout.template, app: afterEffectsApp() }; });
 route('GET', '/api/p/:id', async (_req, { id }) => {
   const h = await needProject(id);
   prerender.open(h);
@@ -1094,6 +1099,12 @@ route('GET', '/api/p/:id/chat', async (_req, { id }) => {
 });
 
 // Claude accounts (profile folders): status, add, sign in, sign out. See server/accounts.js.
+// the coding agents: installed? signed in? (first start); install / Codex sign-in on the user's click
+route('GET', '/api/agents', async () => ({ agents: agentStatus(), accounts: process.env.JIMMY_FAKE_AGENTS === 'none' ? [] : await listAccounts({ fresh: true }) }));
+route('POST', '/api/agents/install', async (req) => ({ job: installAgent(String((await readJsonBody(req)).agent || '')) }));
+route('GET', '/api/agents/install/:agent', async (_req, { agent }) => ({ job: installJob(agent) }));
+route('POST', '/api/agents/codex/login', async () => startCodexLogin());
+route('GET', '/api/agents/codex/login', async () => ({ login: codexLoginState() }));
 route('GET', '/api/accounts', async (_req, _p, url) => ({ accounts: await listAccounts({ fresh: url.searchParams.has('fresh') }) }));
 route('POST', '/api/accounts', async (req) => ({ account: await addProfile((await readJsonBody(req)).name) }));
 route('POST', '/api/accounts/login', async (req) => ({ login: startLogin((await readJsonBody(req)).dir) }));

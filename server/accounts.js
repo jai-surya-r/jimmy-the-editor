@@ -12,6 +12,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { uid } from '../public/js/core/model.js';
 import { addShortcut, removeShortcuts } from './shellprofiles.js';
+import { agentPath } from './agents.js';
 
 const isWin = process.platform === 'win32';
 // If the editor itself was started from inside a Claude Code session, the sessions it starts must not
@@ -39,7 +40,7 @@ export function applyConfigDir(env, configDir) {
 function claudeEnv(configDir) {
   const env = { ...process.env };
   // ~/.local/bin is where Claude Code's installer puts it; included in case PATH wasn't updated
-  env.PATH = [process.env.PATH || process.env.Path || '', path.join(os.homedir(), '.local', 'bin')].join(path.delimiter);
+  env.PATH = agentPath(); // the installers' folders too (agents.js), so a fresh install works without a restart
   delete env.Path;
   for (const k of SESSION_VARS) delete env[k];
   return applyConfigDir(env, configDir);

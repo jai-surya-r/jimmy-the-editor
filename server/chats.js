@@ -8,7 +8,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { APP_DIR, DATA_DIR, readJsonSafe, scriptEnv } from './util.js';
-import { applyConfigDir, SESSION_VARS } from './accounts.js';
+import { agentPath } from './agents.js';
+import { applyConfigDir, SESSION_VARS, accountStatus, DEFAULT_DIR } from './accounts.js';
 import { getConfig } from './config.js';
 import { sessionSettingsFile } from './claudehooks.js';
 import { ensureClaudeMd } from './claudemd.js';
@@ -190,7 +191,7 @@ export class ChatManager {
       CLAUDE_EDIT_CHAT: key,
       ...scriptEnv(),
       // ~/.local/bin is where Claude Code's installer puts it; included in case PATH wasn't updated (or not yet seen)
-      PATH: [binDir, process.env.PATH || process.env.Path || '', path.join(os.homedir(), '.local', 'bin')].join(path.delimiter),
+      PATH: [binDir, agentPath()].join(path.delimiter),
     };
     delete env.Path;
     for (const k of SESSION_VARS) delete env[k];
@@ -463,8 +464,17 @@ export class ChatManager {
       return;
     }
     if (m.type === 'rate_limit_event' && m.rate_limit_info) {
-      this.limits[accountKey(s.configDir)] = { ...m.rate_limit_info, at: Date.now() };
+      const key = accountKey(s.configDir);
+      const rec = { ...m.rate_limit_info, at: Date.now(), plan: this.limits[key]?.plan || null };
+      this.limits[key] = rec;
       fs.promises.writeFile(LIMITS_FILE, JSON.stringify(this.limits)).catch(() => {});
+      // the plan decides which windows exist (Pro / Max: a 5-hour session and a week; Ultra: the week only)
+      accountStatus(s.configDir || DEFAULT_DIR).then((st) => {
+        if (!st?.plan || this.limits[key] !== rec || rec.plan === st.plan) return;
+        rec.plan = st.plan;
+        fs.promises.writeFile(LIMITS_FILE, JSON.stringify(this.limits)).catch(() => {});
+        this.status(s);
+      }).catch(() => {});
       this.status(s);
       return;
     }
