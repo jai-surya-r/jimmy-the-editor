@@ -6,6 +6,9 @@ import { app, getTab, activeTab, activate, closeTab, newHomeTab } from '../core/
 import { overlays, openDialog, notify } from '../core/notify.js';
 import { get, post, clientId } from '../core/api.js';
 import { Home } from './Home.js';
+
+// export time left: "45s", "3m 20s", "1h 5m"
+export const etaText = (s) => { s = Math.max(0, Math.round(s)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`; };
 import { Bin } from './Bin.js';
 import { Viewer } from './Viewer.js';
 import { Timeline, handleTimelineKey } from './Timeline.js';
@@ -323,7 +326,7 @@ function JobsButton() {
         <${IconButton} icon="x" size=${14} title="Close (Esc)" onClick=${() => setOpen(null)} /></div>
       ${easing && active.length ? html`<div class="jobs-easing"><${Icon} name="alert" size=${12} />${easing}</div>` : null}
       ${list.map((j) => html`<div class="job-row">
-        <div class="job-top"><div class="job-names"><b>${j.label}</b>${j.projectName ? html`<span class="job-project"><${Icon} name="folder" size=${11} />${j.projectName}</span>` : null}</div><span class="job-status is-${j.paused ? 'paused' : j.status}">${j.paused && !['done', 'error', 'canceled', 'encoding'].includes(j.status) ? `paused · ${Math.round(j.progress * 100)}%` : j.status === 'running' && j.waiting ? `${j.waiting === 'export' ? 'after the export ahead' : 'after the graphic rendering'}${j.progress ? ` · ${Math.round(j.progress * 100)}%` : ''}` : j.status === 'running' ? `${Math.round(j.progress * 100)}%${j.eta != null ? ` · ${j.eta}s left` : ''}` : j.status === 'motion' ? 'rendering motion graphics' : j.status === 'encoding' && j.converting ? `converting to ${j.converting.fps} fps · ${Math.round(j.converting.progress * 100)}%` : j.status}</span></div>
+        <div class="job-top"><div class="job-names"><b>${j.label}</b>${j.projectName ? html`<span class="job-project"><${Icon} name="folder" size=${11} />${j.projectName}</span>` : null}</div><span class="job-status is-${j.paused ? 'paused' : j.status}">${j.paused && !['done', 'error', 'canceled', 'encoding'].includes(j.status) ? `paused · ${Math.round(j.progress * 100)}%` : j.status === 'running' && j.waiting ? `${j.waiting === 'export' ? 'after the export ahead' : 'after the graphic rendering'}${j.progress ? ` · ${Math.round(j.progress * 100)}%` : ''}` : j.status === 'running' ? `${Math.round(j.progress * 100)}%${j.eta != null ? ` · ${etaText(j.eta)} left` : ''}` : j.status === 'motion' ? 'rendering motion graphics' : j.status === 'encoding' && j.converting ? `converting to ${j.converting.fps} fps · ${Math.round(j.converting.progress * 100)}%` : j.status}</span></div>
         ${!['done', 'error', 'canceled'].includes(j.status) ? html`<div class="progress"><div style=${{ width: `${Math.round((j.progress || 0) * 100)}%` }}></div></div>` : null}
         ${j.error ? html`<div class="job-error">${j.error}</div>` : null}
         <div class="job-actions">

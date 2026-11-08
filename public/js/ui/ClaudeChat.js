@@ -368,7 +368,7 @@ export function Limits({ limits }) {
       <span>${WINDOW_LABELS[k] || k}</span><span class="cc-limit-bar"><i style=${{ width: `${Math.min(100, pct)}%` }}></i></span><span>${pct}%</span>
       ${k === 'five_hour' && v.resetsAt ? html`<span class="cc-limit-reset">resets in ${short(v.resetsAt)}</span>` : null}</div>`;
   })}${hit ? html`<div class="cc-limit is-high">${which[0].toUpperCase()}${which.slice(1)} limit reached · ${fmt(limits.resetsAt)}</div>`
-    : near ? html`<div class="cc-limit is-mid" title=${`Close to the ${which} limit: Claude keeps working, this is an early warning. ${fmt(limits.resetsAt)}`}>Near limit</div>` : null}</div>`;
+    : near ? html`<div class="cc-limit is-mid" title=${`Close to the ${which} limit: Claude keeps working, this is an early warning. ${fmt(limits.resetsAt)}`}>Near limit${limits.resetsAt ? ` · ${fmt(limits.resetsAt)}` : ''}</div>` : null}</div>`;
 }
 
 // How long the conversation is. Claude re-reads all of it on every step, so a long chat uses the

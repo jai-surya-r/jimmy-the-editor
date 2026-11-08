@@ -54,6 +54,9 @@ try {
   let t = await show('Limits', { limits: week76 });
   ok(!/limit reached/i.test(t) && /Near limit/.test(t) && (t.match(/76%/g) || []).length === 1, `76% of the week (Claude Code's warning) shows a short "Near limit", the percentage once: "${t}"`);
   ok(/Session.*10%.*resets in 2h 1[45]m/.test(t), 'the 5-hour session shows when it resets');
+  ok(/Near limit · resets (Mon|Tue|Wed|Thu|Fri|Sat|Sun)/.test(t), `"Near limit" says the day and time it resets: "${t}"`);
+  const { etaText } = { etaText: await page.call(async () => { const A = await import('/js/ui/App.js'); return [A.etaText(42), A.etaText(200), A.etaText(3900)].join('|'); }) };
+  ok(etaText === '42s|3m 20s|1h 5m', `export time left in minutes and seconds, hours past an hour: ${etaText}`);
   t = await show('Limits', { limits: { ...week76, status: 'rejected', utilization: 1, unifiedWindows: { ...week76.unifiedWindows, seven_day: { utilization: 1, resetsAt: now + 86400, status: 'rejected' } } } });
   ok(/Weekly limit reached/.test(t), `a rejected report says the limit is reached: "${t}"`);
   t = await show('Limits', { limits: { ...week76, status: 'allowed', plan: 'ultra' } });

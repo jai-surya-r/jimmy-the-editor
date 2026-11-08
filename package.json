@@ -1,7 +1,7 @@
 {
   "name": "claude-edit",
   "productName": "Jimmy - The Editor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A local, Claude-driven video editor: timeline, bins, sequences, tabs, embedded Claude Code, Frame.io-style review.",
   "license": "GPL-3.0-or-later",
   "author": "Jai Surya R",
