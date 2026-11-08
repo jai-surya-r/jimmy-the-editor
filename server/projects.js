@@ -14,6 +14,7 @@ import { ensureClaudeMd } from './claudemd.js';
 import { layoutFor, adoptLegacyFiles, warmLayout } from './layout.js';
 import { keepNames, resetNames } from './clipnames.js';
 import { watchSnapshots, unwatchSnapshots, beforeChatEdit } from './snapshots.js';
+import { followTimeline } from './followtimeline.js';
 
 // A project folder directly inside the projects folder (those are found by listing it; any other is kept in `recent`).
 const inRoot = (dir, projectsRoot) => projectIdFor(path.dirname(dir)) === projectIdFor(projectsRoot);
@@ -221,12 +222,14 @@ export class ProjectHandle {
       // a chat renaming footage (clips or bin items) is taken back: footage keeps its file's name
       const renamed = this.error ? 0 : keepNames(this.doc, project);
       if (renamed) console.log(`[project] ${project.name}: a chat renamed footage; kept the original names (${renamed})`);
+      const before = this.error ? null : this.doc;
       this.doc = project;
       this.noteSequences(project);
       this.warnings = warnings;
       this.error = null;
       this.rev++;
       this.userRev = this.rev;
+      await this.followTimeline(before, project);
       this.manager.emit(this, { type: 'project', projectId: this.id, rev: this.rev, doc: project, warnings, origin: 'external' });
       if (kept.length) {
         console.log(`[project] ${project.name}: a save from an older copy would have undone ${kept.join(', ')}; kept the newer version`);
@@ -262,6 +265,7 @@ export class ProjectHandle {
     if (origin !== 'server') this.manager.media.fillMeta(this, project);
     project.updatedAt = new Date().toISOString();
     const text = stringifyCompact(serializeProject(project));
+    const before = this.error ? null : this.doc;
     this.doc = project;
     this.noteSequences(project);
     this.warnings = warnings;
@@ -272,6 +276,7 @@ export class ProjectHandle {
     this.queueWrite(this.file, text);
     this.manager.emit(this, { type: 'project', projectId: this.id, rev: this.rev, doc: project, warnings, origin });
     this.manager.media.sync(this).catch((e) => console.warn('[media] sync:', e.message));
+    await this.followTimeline(before, project);
     return { ok: true, rev: this.rev };
   }
 
@@ -280,6 +285,14 @@ export class ProjectHandle {
     const draft = deepClone(this.doc);
     const r = await fn(draft);
     return this.commit(r || draft, { origin });
+  }
+
+  // the open comments on a sequence's live Timeline move with it when its clips move or change length
+  async followTimeline(before, after) {
+    if (!before || !this.reviews || this.reviewsError) return;
+    const draft = deepClone(this.reviews);
+    const moved = followTimeline(before, after, draft);
+    if (moved) await this.commitReviews(draft, { origin: 'server' });
   }
 
   async commitReviews(rawDoc, { origin = 'server', baseRev = null } = {}) {

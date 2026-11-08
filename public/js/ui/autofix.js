@@ -81,6 +81,7 @@ function prompt(list, reviews, seqName) {
     + `Run ${versions.map((v) => `\`vedit comments --open --version ${v}\``).join(' and ')} for their details, drawings and any reference images/links. `
     + 'Work through them ONE AT A TIME, in this order: fix it in project.json, check it with `vedit frame <t>`, then immediately run `vedit reply <commentId> "what you changed" --resolve` (one short line) before the next. '
     + 'If you can\'t fix one or need my input, run `vedit reply <commentId> "your question"` without --resolve and move on to the next. '
+    + 'If a fix changes timing (a graphic gets longer or shorter, clips move), Jimmy moves the other open comments with the timeline, stretching them across a clip that changed length; if you added or removed time at one point, check each remaining comment from this list and put any that now sit on the wrong moment back with `vedit move <commentId> <seconds>`. '
     + `Fix only these comments, only in "${name}". This is the live timeline: do NOT render or export.`;
 }
 

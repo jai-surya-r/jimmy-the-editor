@@ -407,6 +407,22 @@ const commands = {
     console.log(`Resolved ${ids.join(', ')}`);
   },
 
+  async move() {
+    // vedit move <commentId> <seconds> [<end seconds>]  — put an open comment back on its moment after a retime
+    const [id, t, tEnd] = pos;
+    if (!id || !Number.isFinite(parseFloat(t))) die('usage: vedit move <commentId> <seconds> [<end seconds>]');
+    await updateReviews((r) => {
+      const c = r.comments.find((x) => x.id === id);
+      if (!c) die(`no comment ${id}`);
+      const was = c.t;
+      c.t = Math.max(0, parseFloat(t));
+      // a range keeps its length unless a new end is given
+      if (Number.isFinite(parseFloat(tEnd))) c.tEnd = Math.max(c.t, parseFloat(tEnd));
+      else if (c.tEnd != null) c.tEnd = c.tEnd + (c.t - was);
+    });
+    console.log(`Moved ${id} to ${parseFloat(t)}s`);
+  },
+
   async comment() {
     // vedit comment <version> <seconds> "text"  — leave a note as Claude (e.g. a question for the user)
     const [ver, t, text] = pos;
@@ -596,6 +612,7 @@ const commands = {
       [--range a-b | --inout] [--no-version]   (quick by default: full quality if pre-rendered, else a draft; any delivery setting makes it full quality)
   vedit comments [--open] [--version <id|vN>] [--all] [--frames [--full]]
   vedit reply <commentId> "text" [--resolve]
+  vedit move <commentId> <seconds> [<end seconds>]   (open comments follow retimes on their own; this fixes one by hand)
   vedit resolve <commentId...>
   vedit comment <versionId|vN> <seconds> "text"
   vedit validate
