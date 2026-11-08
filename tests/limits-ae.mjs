@@ -77,6 +77,9 @@ try {
   for (let i = 0; i < 100; i++) { if (await page.call(() => !!window.__jimmy).catch(() => false)) break; await sleep(200); }
   await page.call((p) => { window.__jimmy.openProject(p); return true; }, pid);
   await until(() => !!document.querySelector('[data-clip="c_lt"]'), 20000);
+  // every clip in view, even on a small screen
+  await page.call(() => { window.__jimmy.activeTab().ui.set({ pps: 35, scrollX: 0 }); return true; });
+  await until(() => !!document.querySelector('[data-clip="c_tx"]'), 10000);
   const menuFor = async (cid, sel) => {
     await page.call((s) => { window.__jimmy.activeTab().ui.set({ selection: s }); return true; }, sel);
     const [x, y] = await page.call((c) => { const r = document.querySelector(`[data-clip="${c}"]`).getBoundingClientRect(); return [r.left + 10, r.top + r.height / 2]; }, cid);
