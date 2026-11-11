@@ -1,12 +1,15 @@
-// Jimmy as a desktop app: runs the Jimmy server inside this (Electron main) process on a free port, bound to
-// 127.0.0.1 as always, and shows the editor in a window of its own. `npm run app` starts it.
+// Jimmy as a desktop app: runs the Jimmy server in a process of its own (electron/server-child.js, Electron's
+// utility process) on a free port, bound to 127.0.0.1 as always, and shows the editor in a window of its own.
+// This main process only does the window, the system dialogs and the hidden motion-graphic windows (which only it
+// can make; the server drives them through messages, server/apphost.js), so nothing the server does holds up the
+// editor's clicks, keys and drawing. `npm run app` starts it.
 // The browser path (`npm start`, bin/start-mac.sh) doesn't use this file and works as before.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell, utilityProcess } from 'electron';
 import { runWorkerHost } from './worker-host.js';
 
 // Node's file and hashing threads (4 by default): a file on a slow or disconnected network drive holds one for
@@ -94,11 +97,11 @@ function start() {
   // Closing the window while an export or a motion graphic renders would lose it: ask first.
   async function confirmClose(e) {
     if (quitting || !server) return;
-    const { exports, graphics } = server.busyWork();
-    if (!exports && !graphics) { quitting = true; return; }
     e.preventDefault();
     if (asking) return; // closed again while the question is open: one question is enough
     asking = true;
+    const { exports, graphics } = await server.busyWork().catch(() => ({ exports: 0, graphics: 0 }));
+    if (!exports && !graphics) { asking = false; quitting = true; win?.close(); return; }
     const what = [exports && `${exports} export${exports > 1 ? 's' : ''}`, graphics && `${graphics} motion graphic${graphics > 1 ? 's' : ''}`].filter(Boolean).join(' and ');
     const { response } = await dialog.showMessageBox(win, {
       type: 'warning', buttons: ['Keep working', 'Quit anyway'], defaultId: 0, cancelId: 0, noLink: true,
@@ -180,7 +183,7 @@ function start() {
   app.whenReady().then(async () => {
     try { migrateData(process.env.JIMMY_DATA_DIR); } catch (err) { console.warn('[app] could not copy the old settings:', err.message); }
     // the server reads JIMMY_DATA_DIR (and the rest of the environment) when it is first imported
-    server = await import('../server/index.js');
+    server = await startServer();
     // Settings › Quit Jimmy (and the end of shutdown below) end the app through Electron
     server.onExit(() => {
       // app.exit skips Chromium's own shutdown: write the window's storage (settings) out first
@@ -196,6 +199,73 @@ function start() {
     dialog.showErrorBox('Jimmy did not start', String(err?.stack || err));
     app.exit(1);
   });
+
+  // The server in its own process. The object stands in for the server module the app used to import:
+  // ready (the editor's URL), busyWork(), shutdown(), onExit(), perflog.event().
+  async function startServer() {
+    const { openMotionWindowHere } = await import('../server/apphost.js');
+    const child = utilityProcess.fork(path.join(APP_DIR, 'electron', 'server-child.js'), [], {
+      serviceName: 'Jimmy server', stdio: 'inherit',
+      env: { ...process.env, JIMMY_SERVER_CHILD: '1', JIMMY_APP_EXE: process.execPath, JIMMY_APP_DEV: process.defaultApp ? '1' : '' },
+    });
+    let exitFn = () => {};
+    let ended = false;
+    let readyFn, failFn;
+    const ready = new Promise((res, rej) => { readyFn = res; failFn = rej; });
+    const busy = new Map();
+    let n = 0;
+    const pages = new Map(); // motion pages the server opened here
+    let pageId = 0;
+    const answer = (m, result, error) => { if (!ended) child.postMessage({ t: 'reply', n: m.n, result, error }); };
+    const asks = {
+      'page.open': async ({ width, height }) => {
+        const id = ++pageId;
+        pages.set(id, await openMotionWindowHere(width, height, (method, params) => { if (!ended) child.postMessage({ t: 'pageEvent', id, method, params }); }));
+        return { id };
+      },
+      'page.send': ({ id, method, params, ms }) => {
+        const p = pages.get(id);
+        if (!p) throw new Error('The page was closed');
+        return p.send(method, params, ms);
+      },
+      trash: async ({ dir }) => { await shell.trashItem(dir); return true; },
+    };
+    child.on('message', (m) => {
+      if (m?.t === 'ready') readyFn({ url: m.url });
+      else if (m?.t === 'failed') failFn(new Error(m.error));
+      else if (m?.t === 'exit') exitFn();
+      else if (m?.t === 'busy') { busy.get(m.n)?.(m.work); busy.delete(m.n); }
+      else if (m?.t === 'ask') {
+        const fn = asks[m.op];
+        if (!fn) { answer(m, null, `unknown request ${m.op}`); return; }
+        Promise.resolve().then(() => fn(m.args || {})).then((r) => answer(m, r), (err) => answer(m, null, err?.message || String(err)));
+      } else if (m?.t === 'tell' && m.op === 'page.close') { pages.get(m.args?.id)?.close(); pages.delete(m.args?.id); }
+    });
+    // the server process ending on its own (a crash): nothing works without it
+    child.on('exit', (code) => {
+      ended = true;
+      for (const p of pages.values()) p.close();
+      pages.clear();
+      failFn(new Error(`the server stopped (exit ${code})`));
+      if (quitting) return;
+      console.error(`[app] the server process stopped (exit ${code})`);
+      if (code !== 0) dialog.showErrorBox('Jimmy stopped', `Jimmy's server stopped unexpectedly (exit ${code}). Open Jimmy again to go on; your projects are saved as you work.`);
+      app.exit(code || 1);
+    });
+    return {
+      ready,
+      onExit: (fn) => { exitFn = fn; },
+      busyWork: () => new Promise((res, rej) => {
+        if (ended) { res({ exports: 0, graphics: 0 }); return; }
+        const i = ++n;
+        busy.set(i, res);
+        child.postMessage({ t: 'busy', n: i });
+        setTimeout(() => { if (busy.delete(i)) rej(new Error('no answer')); }, 3000);
+      }),
+      shutdown: () => { quitting = true; if (!ended) child.postMessage({ t: 'shutdown' }); else exitFn(); },
+      perflog: { event: (kind, data) => { if (!ended) child.postMessage({ t: 'perfEvent', kind, data }); } },
+    };
+  }
 
   // The hidden render windows don't keep the app alive on their own: the editor window's 'closed' ends it.
   app.on('window-all-closed', () => { if (!win) app.quit(); });

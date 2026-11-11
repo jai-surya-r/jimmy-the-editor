@@ -127,8 +127,8 @@ async function moveToTrash(dir) {
     return;
   }
   if (process.versions.electron) {
-    const { shell } = await import('electron');
-    if (shell?.trashItem) { await shell.trashItem(dir); return; }
+    const { trashWithApp } = await import('./apphost.js');
+    if (await trashWithApp(dir)) return;
   }
   if (isWin) {
     await new Promise((resolve, reject) => {

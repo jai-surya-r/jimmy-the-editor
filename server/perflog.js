@@ -11,7 +11,8 @@
 // One JSON line each, in <data>/logs/perf-YYYY-MM-DD.jsonl, kept 7 days. `node bin/perf-report.mjs` sums one up.
 // The log lives in the app's data folder on this computer, never next to the footage: a NAS going away doesn't
 // take it along. A line that can't be written stays in memory and goes out with the next write.
-// JIMMY_PERFLOG=0 turns it off.
+// Off unless asked for: config.json "perfLog": true or JIMMY_PERFLOG=1 (its 50 Hz freeze check and the profiler
+// it starts after a freeze cost the app time themselves). JIMMY_PERFLOG=0 keeps it off either way.
 import { spawn, execFile } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -128,6 +129,7 @@ class PerfLog {
 
   start(dataDir) {
     if (this.on || process.env.JIMMY_PERFLOG === '0') return;
+    if (process.env.JIMMY_PERFLOG !== '1' && !this.wanted) return;
     this.on = true;
     this.dir = path.join(dataDir, 'logs');
     fs.mkdirSync(this.dir, { recursive: true });

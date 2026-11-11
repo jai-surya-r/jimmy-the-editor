@@ -8,7 +8,8 @@ import { startPerf, registerStats } from './core/perf.js';
 import { firstRun } from './ui/welcome.js';
 
 initTheme();
-startPerf();
+// the editor's half of the performance recorder: only while the server's is on (off by default, server/perflog.js)
+fetch('/api/state').then((r) => r.json()).then((s) => { if (s.perfLog) startPerf(); }).catch(() => {});
 
 socket.connect();
 loadServerState();

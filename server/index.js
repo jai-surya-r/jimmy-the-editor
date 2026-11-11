@@ -127,6 +127,7 @@ perflog.activity = () => {
   sent.clear();
   return act;
 };
+perflog.wanted = getConfig().perfLog === true; // off by default (perflog.js)
 perflog.start(DATA_DIR);
 // what the person at the keyboard is doing, for the scheduler (scheduler.js)
 budget.userState = () => ({
@@ -320,6 +321,7 @@ route('POST', '/api/p/:id/close', async (req, { id }) => {
 });
 route('POST', '/api/perf', async (req) => { const b = await readJsonBody(req); perflog.fromEditor(b.client, b.items); return { ok: true }; });
 route('GET', '/api/state', async () => ({
+  perfLog: !!perflog.on,
   app: 'claude-edit', version: '0.1.0', port: PORT, desktop: IN_ELECTRON, projectsRoot: getConfig().projectsRoot,
   afterEffects: afterEffectsApp(), // Adobe After Effects here: the clip menu offers "convert to AE project" only then
   welcome: !process.env.JIMMY_NO_WELCOME, // first-start setup and tour (off in the test runs that don't test them)
