@@ -10,7 +10,19 @@ import { openDialog, overlays, notify } from '../core/notify.js';
 import { openAccounts } from './accounts.js';
 
 const KEY = { skipSetup: 'jimmy.setup.skip', home: 'jimmy.tour.home', editor: 'jimmy.tour.editor' };
-const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private */ } } };
+// Kept by the server (config.json "seen"): the window's own storage doesn't last in the desktop app. The window's
+// storage is still read and written for the browser version.
+const SEEN = { [KEY.skipSetup]: 'setup', [KEY.home]: 'home', [KEY.editor]: 'editor' };
+const ls = {
+  get: (k) => { if (app.get().server?.seen?.[SEEN[k]]) return '1'; try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => {
+    try { localStorage.setItem(k, v); } catch { /* private */ }
+    if (!SEEN[k]) return;
+    const seen = { ...(app.get().server?.seen || {}), [SEEN[k]]: !!v };
+    app.set((s) => ({ ...s, server: s.server ? { ...s.server, seen } : s.server }));
+    post('/api/settings', { seen: { [SEEN[k]]: !!v } }).catch(() => {});
+  },
+};
 
 // ------------------------------------------------------------------ agents
 export async function agentsReady() {

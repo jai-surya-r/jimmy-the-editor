@@ -128,6 +128,12 @@ perflog.activity = () => {
   return act;
 };
 perflog.wanted = getConfig().perfLog === true; // off by default (perflog.js)
+// Someone who used Jimmy before this version kept the "seen" marks of the welcome window and the tours in the
+// window's storage, which the desktop app lost at every start (a new port each time): they count as seen.
+const USED_BEFORE = (() => {
+  try { return !!getConfig().recent?.length || fs.existsSync(path.join(DATA_DIR, 'chat-names.json')) || fs.readdirSync(path.join(DATA_DIR, 'state')).length > 0; } catch { return false; }
+})();
+const seenMarks = () => getConfig().seen || (USED_BEFORE ? { setup: true, home: true, editor: true } : {});
 perflog.start(DATA_DIR);
 // what the person at the keyboard is doing, for the scheduler (scheduler.js)
 budget.userState = () => ({
@@ -322,6 +328,7 @@ route('POST', '/api/p/:id/close', async (req, { id }) => {
 route('POST', '/api/perf', async (req) => { const b = await readJsonBody(req); perflog.fromEditor(b.client, b.items); return { ok: true }; });
 route('GET', '/api/state', async () => ({
   perfLog: !!perflog.on,
+  seen: seenMarks(), // the welcome window and the tours already shown (ui/welcome.js)
   app: 'claude-edit', version: '0.1.0', port: PORT, desktop: IN_ELECTRON, projectsRoot: getConfig().projectsRoot,
   afterEffects: afterEffectsApp(), // Adobe After Effects here: the clip menu offers "convert to AE project" only then
   welcome: !process.env.JIMMY_NO_WELCOME, // first-start setup and tour (off in the test runs that don't test them)
@@ -339,6 +346,7 @@ route('POST', '/api/settings', async (req) => {
   const body = await readJsonBody(req);
   const patch = {};
   if ('claudeConfigDir' in body) patch.claudeConfigDir = body.claudeConfigDir || null;
+  if (body.seen && typeof body.seen === 'object') patch.seen = { ...seenMarks(), ...Object.fromEntries(['setup', 'home', 'editor'].filter((k) => k in body.seen).map((k) => [k, !!body.seen[k]])) };
   if (body.performance) {
     const p = body.performance;
     patch.performance = {

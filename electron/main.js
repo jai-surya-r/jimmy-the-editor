@@ -5,6 +5,7 @@
 // editor's clicks, keys and drawing. `npm run app` starts it.
 // The browser path (`npm start`, bin/start-mac.sh) doesn't use this file and works as before.
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -65,6 +66,15 @@ function macPath() {
   const home = os.homedir();
   const dirs = ['/opt/homebrew/bin', '/usr/local/bin', `${home}/.local/bin`, `${home}/.npm-global/bin`, `${home}/.claude/local`, login, process.env.PATH];
   return [...new Set(dirs.filter(Boolean).join(':').split(':').filter(Boolean))].join(':');
+}
+
+// Nothing listens on this port of 127.0.0.1 (the app can have it).
+function portFree(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', () => resolve(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true)));
+  });
 }
 
 // The first launch takes over the browser version's data/ folder next to the app (a copy; the original stays).
@@ -182,6 +192,14 @@ function start() {
 
   app.whenReady().then(async () => {
     try { migrateData(process.env.JIMMY_DATA_DIR); } catch (err) { console.warn('[app] could not copy the old settings:', err.message); }
+    // The same port every time (the one the app had last, while it is free): the editor window's storage (its
+    // settings, open tabs, tours seen) belongs to the page's address, port included, and a new port each start lost it.
+    const portFile = path.join(process.env.JIMMY_DATA_DIR, 'app-port.json');
+    if (process.env.CLAUDE_EDIT_PORT === '0') {
+      let saved = 0;
+      try { saved = Number(JSON.parse(fs.readFileSync(portFile, 'utf8')).port) || 0; } catch { /* first start */ }
+      if (saved && await portFree(saved)) process.env.CLAUDE_EDIT_PORT = String(saved);
+    }
     // the server reads JIMMY_DATA_DIR (and the rest of the environment) when it is first imported
     server = await startServer();
     // Settings › Quit Jimmy (and the end of shutdown below) end the app through Electron
@@ -191,6 +209,7 @@ function start() {
       setTimeout(() => app.exit(0), 200);
     });
     const { url } = await server.ready;
+    try { fs.writeFileSync(portFile, JSON.stringify({ port: Number(new URL(url).port) }) + '\n'); } catch { /* next start picks another */ }
     createWindow(url);
     showTaskbarIcon();
     nativeTheme.on('updated', showTaskbarIcon);
@@ -233,7 +252,7 @@ function start() {
     child.on('message', (m) => {
       if (m?.t === 'ready') readyFn({ url: m.url });
       else if (m?.t === 'failed') failFn(new Error(m.error));
-      else if (m?.t === 'exit') exitFn();
+      else if (m?.t === 'exit') { quitting = true; exitFn(); } // the server is done: the app ends (its process may end first)
       else if (m?.t === 'busy') { busy.get(m.n)?.(m.work); busy.delete(m.n); }
       else if (m?.t === 'ask') {
         const fn = asks[m.op];

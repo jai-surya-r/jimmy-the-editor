@@ -63,6 +63,11 @@ try {
   await page.call(() => { location.reload(); return true; });
   await sleep(4000);
   ok(await page.call(() => !document.querySelector('.setup-dialog') && !document.querySelector('.tour')), 'nothing opens by itself any more');
+  // the window's storage gone (the desktop app used to start on a new port each time, and lost it): the server remembers
+  await page.call(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('jimmy.')) localStorage.removeItem(k); location.reload(); return true; });
+  await sleep(4000);
+  ok(await page.call(() => !document.querySelector('.setup-dialog') && !document.querySelector('.tour')), 'not even when the window has forgotten everything (the server keeps what was seen)');
+  ok(JSON.parse(fs.readFileSync(path.join(DATA, 'config.json'), 'utf8')).seen?.home === true, 'config.json keeps the tour as seen');
 
   console.log('The editor tour');
   const { id } = await api('POST', '/api/projects/open', { path: DIR });
