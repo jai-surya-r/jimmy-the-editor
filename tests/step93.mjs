@@ -102,7 +102,7 @@ try {
 
   console.log('Alt-drag duplicates');
   const [x0, y0] = await at('v1', 3.5);
-  const [x1, y1] = await at('v2', 6.5);
+  const [x1, y1] = await at('v1', 7); // the same track: on a small screen (GitHub's Macs) only one track may be in view
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x0, y: y0 });
   await mouse('mousePressed', x0, y0, { modifiers: 1 });
   for (let i = 1; i <= 8; i++) { await mouse('mouseMoved', x0 + ((x1 - x0) * i) / 8, y0 + ((y1 - y0) * i) / 8, { modifiers: 1 }); await sleep(30); }
@@ -112,12 +112,12 @@ try {
   const orig = cs.find((c) => c.id === 'c_b');
   const copy = cs.find((c) => c.id !== 'c_b' && c.color === '#40a0e0');
   ok(orig && orig.start === 3 && orig.track === 'v1', `the clip stays where it was (${orig?.track} ${orig?.start} s)`);
-  ok(copy && copy.track === 'v2' && Math.abs(copy.start - 6) < 0.05 && copy.duration === 2, `a copy is dropped where the mouse let go (${copy ? `${copy.track} ${copy.start} s` : 'none'})`);
+  ok(copy && copy.track === 'v1' && Math.abs(copy.start - 6.5) < 0.05 && copy.duration === 2, `a copy is dropped where the mouse let go (${copy ? `${copy.track} ${copy.start} s` : 'none'})`);
   const selNow = await page.call(() => window.__jimmy.activeTab().ui.get().selection);
   ok(copy && selNow.length === 1 && selNow[0] === copy.id, 'the copy is selected after the drop, as in Premiere');
   // a plain drag still moves
-  const [m0x, m0y] = await at('v2', copy.start + 1);
-  const [m1x] = await at('v2', copy.start + 2);
+  const [m0x, m0y] = await at('v1', copy.start + 1);
+  const [m1x] = await at('v1', copy.start + 2);
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: m0x, y: m0y });
   await mouse('mousePressed', m0x, m0y);
   for (let i = 1; i <= 5; i++) { await mouse('mouseMoved', m0x + ((m1x - m0x) * i) / 5, m0y); await sleep(30); }
