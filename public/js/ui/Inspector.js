@@ -124,42 +124,48 @@ function Row({ label, children, kf }) {
 // A numeric, keyframe-able property row. Left: stopwatch (animate on/off). Right: Premiere-style
 // keyframe navigator — ◀ previous keyframe, ◆ add/remove a keyframe at the playhead, ▶ next keyframe.
 // With several clips selected every action runs on each of them, at the playhead's time in that clip.
-function PropRow({ tab, clip, ids, fps, localT, prop, label, mult = 1, step = 1, precision = 1, unit = '', min = -Infinity, max = Infinity, format, parse }) {
+// pair: two properties shown as one (Position = X and Y, as in After Effects): one stopwatch and one keyframe
+// for both, a field for each.
+function PropRow({ tab, clip, ids, fps, localT, prop, pair, label, mult = 1, step = 1, precision = 1, unit = '', min = -Infinity, max = Infinity, format, parse }) {
+  const P = pair || [prop];
+  prop = P[0];
   const targets = ids || [clip.id];
   const T = clip.start + localT; // playhead (timeline time) when this was drawn
   // actions take the playhead as it is when they happen: a row without keyframes is not redrawn every frame
   const now = () => tab.time.get().t;
   const ltOf = (c, at = T) => snapTime(clamp(at - c.start, 0, c.duration), fps);
   const covers = (c, at = T) => at >= c.start - 1e-6 && at <= c.start + c.duration + 1e-6;
-  const animated = isAnimated(clip, prop);
+  const animated = P.some((p) => isAnimated(clip, p));
   const inRange = covers(clip);
   const lt = ltOf(clip);
   const v = propAt(clip, prop, lt);
-  const kf = animated ? keyframeAt(clip, prop, lt, fps) : null;
+  const kfOf = (p) => (isAnimated(clip, p) ? keyframeAt(clip, p, lt, fps) : null);
+  const kf = animated ? P.map(kfOf).find(Boolean) || null : null;
+  const kp = kf ? P.find((p) => kfOf(p) === kf) : prop; // the property whose keyframe kf is
   const ed = editor(tab, targets, `Change ${label.toLowerCase()}`);
-  const times = animated ? (clip.keyframes[prop] || []).map((k) => k.t) : [];
+  const times = animated ? [...new Set(P.flatMap((p) => (clip.keyframes[p] || []).map((k) => k.t)))].sort((a, b) => a - b) : [];
   const prev = times.filter((t) => t < lt - 1e-4).pop();
   const next = times.find((t) => t > lt + 1e-4);
-  const nextKf = kf ? clip.keyframes[prop][clip.keyframes[prop].indexOf(kf) + 1] : null;
+  const nextKf = kf ? clip.keyframes[kp][clip.keyframes[kp].indexOf(kf) + 1] : null;
   const others = targets.length > 1 ? tab.seq.clips.filter((c) => targets.includes(c.id) && c.id !== clip.id) : [];
-  const mixed = others.some((c) => Math.abs(propAt(c, prop, ltOf(c)) - v) > 1e-6);
+  const mixed = others.some((c) => P.some((p) => Math.abs(propAt(c, p, ltOf(c)) - propAt(clip, p, lt)) > 1e-6));
   const toggle = () => {
     const at = now();
     commit(tab, targets, animated ? `Stop animating ${label}` : `Animate ${label}`, (c) => {
-      if (isAnimated(c, prop) !== animated) return false;
+      if (P.some((p) => isAnimated(c, p)) !== animated) return false;
       if (!animated && !covers(c, at)) return false;
-      toggleAnimation(c, prop, ltOf(c, at));
+      for (const p of P) if (isAnimated(c, p) === animated) toggleAnimation(c, p, ltOf(c, at));
       return undefined;
     });
   };
   const diamond = () => {
     const at = now();
-    const on = animated && !!keyframeAt(clip, prop, ltOf(clip, at), fps);
+    const on = animated && P.some((p) => !!keyframeAt(clip, p, ltOf(clip, at), fps));
     commit(tab, targets, on ? 'Remove keyframe' : 'Add keyframe', (c) => {
       if (!covers(c, at)) return false;
       const l = ltOf(c, at);
-      if (on) { if (!keyframeAt(c, prop, l, fps)) return false; removeKeyframeAt(c, prop, l, fps); }
-      else upsertKeyframe(c, prop, l, propAt(c, prop, l), fps);
+      if (on) { if (!P.some((p) => keyframeAt(c, p, l, fps))) return false; for (const p of P) if (keyframeAt(c, p, l, fps)) removeKeyframeAt(c, p, l, fps); }
+      else for (const p of P) upsertKeyframe(c, p, l, propAt(c, p, l), fps);
       return undefined;
     });
   };
@@ -167,10 +173,12 @@ function PropRow({ tab, clip, ids, fps, localT, prop, label, mult = 1, step = 1,
     <button class="kf-toggle ${animated ? 'is-on' : ''}" title=${animated ? 'Toggle animation off (keeps the current value)' : 'Toggle animation (adds a keyframe at the playhead)'}
       disabled=${!inRange && !animated} onClick=${toggle}><${Icon} name="clock" size=${12} /></button>
     <label class="prop-label" title=${mixed ? `${label}: values differ between the selected clips` : label}>${label}</label>
-    <div class="prop-value">
+    <div class="prop-value ${pair ? 'prop-pair' : ''}">
       <${NumField} value=${v * mult} step=${step} precision=${precision} unit=${unit} min=${min * mult} max=${max * mult} format=${format} parse=${parse}
         title=${mixed ? 'Values differ between the selected clips — typing sets them all' : undefined}
         onStart=${ed.onStart} onChange=${(x) => ed.change((c) => setPropAt(c, prop, x / mult, ltOf(c, now()), fps))} onEnd=${ed.onEnd} />
+      ${pair ? P.slice(1).map((p) => html`<${NumField} key=${p} value=${propAt(clip, p, lt) * mult} step=${step} precision=${precision} unit=${unit}
+        onStart=${ed.onStart} onChange=${(x) => ed.change((c) => setPropAt(c, p, x / mult, ltOf(c, now()), fps))} onEnd=${ed.onEnd} />`) : null}
     </div>
     <div class="kf-nav">
       <button title="Go to previous keyframe" disabled=${prev == null} onClick=${() => tab.engine.seek(clip.start + prev)}><${Icon} name="prev" size=${11} /></button>
@@ -185,15 +193,19 @@ function PropRow({ tab, clip, ids, fps, localT, prop, label, mult = 1, step = 1,
         onChange=${(val) => {
           if (val === 'custom') { tab.ui.set({ graph: true }); return; }
           commit(tab, targets, 'Change easing', (c) => {
-            const list = c.keyframes?.[prop] || [];
-            const k = keyframeAt(c, prop, ltOf(c), fps);
-            if (!k) return false;
-            k.ease = val;
-            // a named ease replaces the graph handles of this segment
-            delete k.out;
-            const nk = list[list.indexOf(k) + 1];
-            if (nk) delete nk.in;
-            return undefined;
+            let any = false;
+            for (const p of P) {
+              const list = c.keyframes?.[p] || [];
+              const k = keyframeAt(c, p, ltOf(c), fps);
+              if (!k) continue;
+              any = true;
+              k.ease = val;
+              // a named ease replaces the graph handles of this segment
+              delete k.out;
+              const nk = list[list.indexOf(k) + 1];
+              if (nk) delete nk.in;
+            }
+            return any ? undefined : false;
           });
         }} />
       <button class="kf-graph-btn" title="Open the graph editor" onClick=${() => tab.ui.set({ graph: true })}><${Icon} name="graph" size=${12} /></button>
@@ -266,8 +278,7 @@ function BelowSection(ctx) {
   const { tab, ids } = ctx;
   return html`<${Section} title="Layers below" icon="layers" actions=${html`
     <button class="chip" title="Back to no change" onClick=${() => commit(tab, ids, 'Reset layers below', (c) => { c.below = { x: 0, y: 0, scale: 1, rotation: 0 }; for (const p of ['belowX', 'belowY', 'belowScale', 'belowRotation']) if (c.keyframes) delete c.keyframes[p]; })}>Reset</button>`}>
-    <${PropRow} ...${ctx} prop="belowX" label="Position X" step=${1} precision=${1} unit="px" />
-    <${PropRow} ...${ctx} prop="belowY" label="Position Y" step=${1} precision=${1} unit="px" />
+    <${PropRow} ...${ctx} pair=${['belowX', 'belowY']} label="Position" step=${1} precision=${1} unit="px" />
     <${PropRow} ...${ctx} prop="belowScale" label="Scale" mult=${100} step=${0.5} precision=${1} unit="%" min=${0.01} />
     <${PropRow} ...${ctx} prop="belowRotation" label="Rotation" step=${0.5} precision=${1} unit="°" />
     <div class="insp-note">Moves, zooms and turns everything under this layer (its effects apply to it too). Below, "Layer" sets where it applies: the whole frame, or a smaller or moved area.</div>
@@ -282,8 +293,7 @@ function TransformSection(ctx) {
     ${media || clip.type === 'solid' ? html`<button class="chip" title="Fit inside the frame" onClick=${() => commit(tab, ids, 'Fit to frame', (c) => { if (c.type === 'text') return false; fitClip(c, tab.mediaById[c.media], seq, 'fit'); return undefined; })}>Fit</button>
     <button class="chip" title="Fill the frame (crops edges)" onClick=${() => commit(tab, ids, 'Fill frame', (c) => { if (c.type === 'text') return false; fitClip(c, tab.mediaById[c.media], seq, 'fill'); return undefined; })}>Fill</button>` : null}
     <button class="chip" title="Reset position, rotation and opacity" onClick=${() => commit(tab, ids, 'Reset transform', (c) => { c.transform = { ...c.transform, x: 0, y: 0, rotation: 0, opacity: 1 }; for (const p of ['x', 'y', 'rotation', 'opacity']) delete c.keyframes?.[p]; })}>Reset</button>`}>
-    <${PropRow} ...${ctx} prop="x" label="Position X" step=${1} precision=${1} unit="px" />
-    <${PropRow} ...${ctx} prop="y" label="Position Y" step=${1} precision=${1} unit="px" />
+    <${PropRow} ...${ctx} pair=${['x', 'y']} label="Position" step=${1} precision=${1} unit="px" />
     <${PropRow} ...${ctx} prop="scale" label="Scale" mult=${100} step=${0.5} precision=${1} unit="%" min=${0} />
     <${PropRow} ...${ctx} prop="rotation" label="Rotation" step=${0.5} precision=${1} unit="°" />
     <${PropRow} ...${ctx} prop="opacity" label="Opacity" mult=${100} step=${1} precision=${0} unit="%" min=${0} max=${1} />

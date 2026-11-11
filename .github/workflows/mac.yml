@@ -99,7 +99,7 @@ jobs:
           tests/mac-disk.mjs tests/scheduler.mjs tests/chat-tasks.mjs tests/chat-paths.mjs tests/clip-names.mjs
           tests/xml-timecode.mjs tests/template-files.mjs tests/export-folder.mjs tests/audio-export.mjs
           tests/proxy-duplicate.mjs tests/project-close.mjs "npm run golden" tests/export-options.mjs
-          tests/transcripts.mjs tests/check-image.mjs tests/motion-signature.mjs tests/nest-audio.mjs tests/nest-audio-export.mjs tests/comments-follow.mjs
+          tests/transcripts.mjs tests/check-image.mjs tests/motion-signature.mjs tests/nest-audio.mjs tests/nest-audio-export.mjs tests/comments-follow.mjs tests/graph-ease.mjs
       - name: Desktop app tests (this repo's Electron)
         if: always()
         env:
@@ -111,7 +111,7 @@ jobs:
           tests/export-name.mjs tests/settings-save.mjs tests/bin-views.mjs tests/organise.mjs
           tests/gap-select.mjs tests/review-clear.mjs tests/snapshots.mjs tests/reframe.mjs tests/sync.mjs
           tests/nest-adjust.mjs tests/chat-stop.mjs tests/chat-speed.mjs tests/claude-priority.mjs tests/step82.mjs tests/layout.mjs
-          tests/heavy-ui.mjs tests/labels-lightbox.mjs tests/welcome.mjs tests/limits-ae.mjs
+          tests/heavy-ui.mjs tests/labels-lightbox.mjs tests/welcome.mjs tests/limits-ae.mjs tests/step93.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

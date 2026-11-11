@@ -260,9 +260,30 @@ export function Timeline({ tab }) {
     const minStart = Math.min(...clips.map((c) => c.start));
     const x0 = e.clientX, y0 = e.clientY;
     let moved = false, lastDt = 0, lastShift = 0;
+    // Alt held (when the drag starts or during it): the clips stay and copies go where they're dropped, as in
+    // Premiere. Links between copied clips are kept; a link to a clip that isn't copied is dropped.
+    let dup = !!e.altKey && !e.synthetic;
+    let copyIds = [];
     const apply = (ds, dt, shift, final) => {
-      for (const c of ds.clips) {
-        const o = orig.get(c.id);
+      let moving = ds.clips;
+      if (dup) {
+        const links = new Map();
+        const partners = new Map();
+        for (const c of ds.clips) if (ids.has(c.id) && c.link) partners.set(c.link, (partners.get(c.link) || 0) + 1);
+        const copies = ds.clips.filter((c) => ids.has(c.id)).map((c) => {
+          const k = deepClone(c);
+          k.id = uid('c');
+          k.copyOf = c.id;
+          if (k.link) k.link = partners.get(c.link) > 1 ? (links.get(c.link) || links.set(c.link, uid('l')).get(c.link)) : null;
+          return k;
+        });
+        ds.clips.push(...copies);
+        moving = copies;
+        copyIds = copies.map((k) => k.id);
+      }
+      const moveIds = dup ? new Set(copyIds) : ids;
+      for (const c of moving) {
+        const o = orig.get(c.copyOf || c.id);
         if (!o) continue;
         c.start = Math.max(0, snapTime(o.start + dt, fps));
         if (shift && kindOf(c) === kind) {
@@ -271,11 +292,13 @@ export function Timeline({ tab }) {
         }
       }
       // overwrite whatever sits underneath; shown live while dragging, so clips never overlap
-      for (const c of ds.clips.filter((x) => ids.has(x.id))) clearRange(ds, c.track, c.start, clipEnd(c), ids);
+      for (const c of ds.clips.filter((x) => moveIds.has(x.id))) clearRange(ds, c.track, c.start, clipEnd(c), moveIds);
+      if (dup) for (const c of ds.clips) delete c.copyOf;
     };
     capture(e, (ev) => {
       if (!moved && Math.abs(ev.clientX - x0) < 3 && Math.abs(ev.clientY - y0) < 3) return;
       if (!moved) { moved = true; tab.begin(); }
+      if (!e.synthetic) dup = !!ev.altKey;
       let dt = (ev.clientX - x0) / tab.ui.get().pps;
       const vals = [];
       for (const o of orig.values()) vals.push(o.start + dt, o.end + dt);
@@ -294,13 +317,14 @@ export function Timeline({ tab }) {
       }
       lastDt = dt; lastShift = shift;
       tab.preview((d, ds) => apply(ds, dt, shift, false));
-      setTip({ x: ev.clientX, y: ev.clientY, text: `${dt < 0 ? '−' : '+'}${timecode(Math.abs(dt), fps)}  →  ${timecode(Math.max(0, clip.start + dt), fps)}` });
+      setTip({ x: ev.clientX, y: ev.clientY, text: `${dup ? 'Duplicate  ' : ''}${dt < 0 ? '−' : '+'}${timecode(Math.abs(dt), fps)}  →  ${timecode(Math.max(0, clip.start + dt), fps)}` });
     }, () => {
       setTip(null);
       if (!moved) return;
       if (!lastDt && !lastShift) { tab.cancelDrag(); return; }
       tab.preview((d, ds) => apply(ds, lastDt, lastShift, true));
-      tab.end(clips.length > 1 ? 'Move clips' : 'Move clip');
+      tab.end(dup ? (clips.length > 1 ? 'Duplicate clips' : 'Duplicate clip') : clips.length > 1 ? 'Move clips' : 'Move clip');
+      if (dup) tab.select(copyIds);
     });
   }
 
@@ -651,7 +675,7 @@ export function Timeline({ tab }) {
       if (!picked.length) { tab.ui.set({ selection: [] }); return; }
       tab.ui.set({ selection: picked.map((c) => c.id) });
       const anchor = (clipEl && picked.find((c) => c.id === clipEl.dataset.clip)) || picked.reduce((a, b) => (b.start < a.start ? b : a));
-      startMove({ clientX: e.clientX, clientY: e.clientY, altKey: !e.shiftKey, shiftKey: false, ctrlKey: false, pointerId: e.pointerId, target: e.target, currentTarget: e.currentTarget, button: 0, preventDefault() {}, stopPropagation() {} }, anchor);
+      startMove({ synthetic: true, clientX: e.clientX, clientY: e.clientY, altKey: !e.shiftKey, shiftKey: false, ctrlKey: false, pointerId: e.pointerId, target: e.target, currentTarget: e.currentTarget, button: 0, preventDefault() {}, stopPropagation() {} }, anchor);
       return;
     }
     if (!clipEl) { startMarquee(e, lane); return; }

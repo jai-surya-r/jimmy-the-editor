@@ -511,7 +511,7 @@ export class RenderManager {
     const fps = seq.fps;
     let t0 = 0, t1 = sequenceDuration(seq);
     if (Array.isArray(opts.range)) { t0 = Math.max(0, +opts.range[0] || 0); t1 = Math.min(t1, +opts.range[1] || t1); }
-    else if (opts.range === 'inout' && seq.inPoint != null && seq.outPoint != null && seq.outPoint > seq.inPoint) { t0 = seq.inPoint; t1 = seq.outPoint; }
+    else if (opts.range === 'inout' && (seq.inPoint != null || seq.outPoint != null) && Math.min(t1, seq.outPoint ?? t1) > (seq.inPoint ?? 0)) { t0 = seq.inPoint ?? 0; t1 = Math.min(t1, seq.outPoint ?? t1); }
     if (kind !== 'still' && t1 - t0 < 1 / fps) throw Object.assign(new Error('Nothing to render: the sequence is empty'), { status: 400 });
     if (kind === 'audio') return this.createAudio(handle, seq, t0, t1, opts);
     const quality = QUALITY[opts.quality] ? opts.quality : 'high';

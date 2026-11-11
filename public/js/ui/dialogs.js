@@ -4,7 +4,7 @@ import { html, Modal, Button, Icon, IconButton, Select, Toggle, Segmented, fmtBy
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { openDialog, notify } from '../core/notify.js';
 import { get, post, mediaUrl } from '../core/api.js';
-import { SEQUENCE_PRESETS, FRAME_RATES, makeSequence, findSequence, sequenceDuration, timecode, snapTime, VIDEO_EXT, AUDIO_EXT, IMAGE_EXT } from '../core/model.js';
+import { SEQUENCE_PRESETS, FRAME_RATES, makeSequence, findSequence, sequenceDuration, timecode, parseTime, snapTime, VIDEO_EXT, AUDIO_EXT, IMAGE_EXT } from '../core/model.js';
 import { insertMedia } from '../core/ops.js';
 import { app } from '../core/app.js';
 import { useStore } from '../core/store.js';
@@ -166,7 +166,10 @@ export function ExportDialog({ close, tab, init }) {
   const lossy = !!vf?.lossy;
   const mov = !lossy || o.container === 'mov';
   const byRate = lossy && o.rateMode === 'bitrate';
-  const hasInOut = seq && seq.inPoint != null && seq.outPoint != null && seq.outPoint > seq.inPoint;
+  // In → Out: either point alone works too (in to the end, the start to out)
+  const seqDur = seq ? sequenceDuration(seq) : 0;
+  const io = seq ? [seq.inPoint ?? 0, Math.min(seq.outPoint ?? seqDur, seqDur)] : [0, 0];
+  const hasInOut = !!seq && (seq.inPoint != null || seq.outPoint != null) && io[1] > io[0];
   // the output size: the sequence's shape, at its own size, a common height (the shorter side) or a chosen width
   const sw = seq?.width || 1920, sh = seq?.height || 1080;
   const short = Math.min(sw, sh);
@@ -184,6 +187,17 @@ export function ExportDialog({ close, tab, init }) {
   const audioOptions = VIDEO_AUDIO.filter((a) => !a.mov || mov);
   const audio = audioOptions.some((a) => a.value === o.audio) ? o.audio : (mov && !lossy ? 'pcm16' : 'aac256');
   const [range, setRange] = useState(init?.range ?? (hasInOut ? 'inout' : 'all'));
+  // a custom range, typed as timecode or seconds
+  const [custom, setCustom] = useState(init?.custom ?? null);
+  const firstSeq = useRef(true);
+  useEffect(() => {
+    if (firstSeq.current) { firstSeq.current = false; return; }
+    setRange(hasInOut ? 'inout' : 'all'); setCustom(null);
+  }, [seqId]);
+  const cu = custom || { a: timecode(io[0], seq?.fps || 30), b: timecode(hasInOut ? io[1] : seqDur, seq?.fps || 30) };
+  const cuA = parseTime(cu.a, seq?.fps), cuB = parseTime(cu.b, seq?.fps);
+  const customOk = cuA != null && cuB != null && cuB > cuA && cuA >= 0;
+  const rangeOut = range === 'inout' && hasInOut ? io : range === 'custom' && customOk ? [cuA, Math.min(cuB, seqDur)] : null;
   const [addVersion, setAddVersion] = useState(init?.addVersion ?? true);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState(init?.name ?? null);
@@ -202,7 +216,7 @@ export function ExportDialog({ close, tab, init }) {
     // Only one dialog shows at a time: pick the folder, then come back to this dialog.
     const r = await pickPath({ title: 'Export to folder', mode: 'folder', startPath: outDir && /^[a-z]:|^\//i.test(outDir) ? outDir : tab.store.get().dir, okLabel: 'Export here' });
     if (r?.path) tab.ui.set({ exportDir: r.path });
-    openDialog(ExportDialog, { tab, init: { seqId, o, range, addVersion, audioFmt, name } });
+    openDialog(ExportDialog, { tab, init: { seqId, o, range, custom, addVersion, audioFmt, name } });
   };
   const savePresets = async (next) => {
     app.set((s) => ({ ...s, server: s.server ? { ...s.server, exportPresets: next } : s.server }));
@@ -215,7 +229,7 @@ export function ExportDialog({ close, tab, init }) {
     if (v.startsWith('u:')) setO({ ...DEFAULT_EXPORT, ...presets[v.slice(2)] });
     else { const p = BUILTIN_PRESETS.find((x) => x.name === v); if (p) setO({ ...DEFAULT_EXPORT, ...p.o }); }
   };
-  const dur = seq ? (range === 'inout' && hasInOut ? seq.outPoint - seq.inPoint : sequenceDuration(seq)) : 0;
+  const dur = seq ? (rangeOut ? rangeOut[1] - rangeOut[0] : range === 'custom' ? 0 : seqDur) : 0;
   const outFps = o.fps === 'match' ? seq?.fps : +o.fps;
   const audioKbps = audio === 'none' ? 0 : audio.startsWith('aac') ? +audio.slice(3) : (o.sampleRate * 2 * (audio === 'pcm24' ? 24 : 16)) / 1000;
   const estMB = byRate ? ((+o.mbps || 0) * 1000 + audioKbps) * dur / 8 / 1000 : null;
@@ -242,9 +256,9 @@ export function ExportDialog({ close, tab, init }) {
       const a = audio === 'none' ? { codec: 'none' } : audio.startsWith('aac') ? { codec: 'aac', kbps: +audio.slice(3) } : { codec: audio };
       // only a name the person typed goes to the server; the default is worked out there, as before
       const fileName = name != null && name.trim() && name.trim() !== defaultName ? name.trim() : undefined;
-      const r = await post(`/api/p/${tab.projectId}/render`, audioOnly ? { sequenceId: seqId, audio: audioFmt, range: range === 'inout' ? 'inout' : null, outDir, name: fileName }
+      const r = await post(`/api/p/${tab.projectId}/render`, audioOnly ? { sequenceId: seqId, audio: audioFmt, range: rangeOut, outDir, name: fileName }
         : {
-          sequenceId: seqId, name: fileName, quality: lossy && !byRate ? quality : 'high', format, scale, range: range === 'inout' ? 'inout' : null, addVersion: canReview && addVersion, outDir,
+          sequenceId: seqId, name: fileName, quality: lossy && !byRate ? quality : 'high', format, scale, range: rangeOut, addVersion: canReview && addVersion, outDir,
           rate: byRate ? { mbps: +o.mbps, cbr: !!o.cbr } : null, container: lossy ? o.container : null,
           fps: o.fps === 'match' ? null : +o.fps, audioOut: { ...a, rate: o.sampleRate },
         });
@@ -311,7 +325,13 @@ export function ExportDialog({ close, tab, init }) {
           options=${[{ value: '48000', label: '48 kHz' }, { value: '44100', label: '44.1 kHz' }]} /></label>
       </div>`}
       <label class="field"><span>Range</span><${Select} value=${range} onChange=${setRange}
-        options=${[{ value: 'all', label: 'Entire sequence' }, { value: 'inout', label: 'In → Out', disabled: !hasInOut }]} /></label>
+        options=${[{ value: 'all', label: `Entire sequence · ${timecode(seqDur, seq?.fps || 30)}` },
+          { value: 'inout', label: hasInOut ? `In → Out · ${timecode(io[0], seq.fps)} → ${timecode(io[1], seq.fps)}` : 'In → Out (set In / Out on this sequence first)', disabled: !hasInOut },
+          { value: 'custom', label: 'Custom range…' }]} /></label>
+      ${range === 'custom' ? html`<div class="field-row export-range">
+        <label class="field"><span>From</span><input class="input" data-esc value=${cu.a} spellcheck=${false} onInput=${(e) => { const v = e.target.value; setCustom((p) => ({ ...(p || cu), a: v })); }} onKeyDown=${(e) => e.stopPropagation()} /></label>
+        <label class="field"><span>To</span><input class="input" data-esc value=${cu.b} spellcheck=${false} onInput=${(e) => { const v = e.target.value; setCustom((p) => ({ ...(p || cu), b: v })); }} onKeyDown=${(e) => e.stopPropagation()} /></label>
+      </div>${!customOk ? html`<span class="dialog-hint">Type two times (00:00:05:00 or 5.0), the second after the first.</span>` : null}` : null}
       <label class="field"><span>File name</span><div class="field-row export-name" style=${{ gap: '6px', alignItems: 'center' }}>
         <input class="input" data-esc value=${shownName} spellcheck=${false} onInput=${(e) => setName(e.target.value)}
           onKeyDown=${(e) => { e.stopPropagation(); if (e.key === 'Enter' && !busy && seq && dur > 0 && !badRate) go(); }} />

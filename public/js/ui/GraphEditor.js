@@ -7,8 +7,11 @@ import { useStore } from '../core/store.js';
 import { evalKeyframes, speedAt, segmentBezier, clamp, snapTime, timecode } from '../core/model.js';
 import { bakeSegment, setKeyframeInterp, deleteKeyframes } from '../core/ops.js';
 import { commandOf } from './keymap.js';
+import { PAIRS, pairOf, joinable, joinPair, withJoined, sideShape, setSide, PRESETS, applyPreset } from './graphpos.js';
 
 const PROPS = {
+  position: { label: 'Position', unit: 'px', mult: 1, color: '#ff6b6b' },
+  belowPosition: { label: 'Position', unit: 'px', mult: 1, color: '#ff6b6b' },
   x: { label: 'Position X', unit: 'px', mult: 1, color: '#ff6b6b' },
   y: { label: 'Position Y', unit: 'px', mult: 1, color: '#51cf66' },
   scale: { label: 'Scale', unit: '%', mult: 100, color: '#4dabf7' },
@@ -41,12 +44,31 @@ export function GraphEditor({ tab }) {
   const box = useStore(tab.ui, (s) => s.graphBox) || { x: 24, y: 24, w: 720, h: 320 };
   const now = useStore(tab.time, (s) => s.t);
   const seq = doc ? tab.seq : null;
-  const clip = seq && seq.clips.find((c) => selection.includes(c.id) && Object.keys(c.keyframes || {}).length)
+  const real = seq && seq.clips.find((c) => selection.includes(c.id) && Object.keys(c.keyframes || {}).length)
     || (seq && seq.clips.find((c) => c.id === selection[0])) || null;
   const fps = seq?.fps || 30;
+  // Position X and Y are one property here (After Effects style): one curve, one ease for both. "Separate
+  // dimensions" shows them as two.
+  const separate = useStore(tab.ui, (s) => s.graphSeparate);
+  const joined = !real || separate ? [] : PAIRS.filter((p) => joinable(real, p, fps));
+  const splittable = !!real && PAIRS.some((p) => real.keyframes?.[p.a]?.length && real.keyframes?.[p.b]?.length);
+  const clip = useMemo(() => {
+    if (!real || !joined.length) return real;
+    const kf = {};
+    for (const [p, list] of Object.entries(real.keyframes)) {
+      const pair = joined.find((x) => x.a === p || x.b === p);
+      if (!pair) kf[p] = list;
+      else if (p === pair.a) kf[pair.id] = joinPair(real, pair);
+    }
+    return { ...real, keyframes: kf };
+  }, [real, joined.map((p) => p.id).join(',')]);
+  // edit the real clip in a draft with the joined lists in place (written back to X and Y after)
+  const editJoined = (c, fn) => withJoined(c, joined, fn);
   const props = clip ? Object.keys(clip.keyframes || {}).filter((p) => clip.keyframes[p]?.length) : [];
   const shown = props.filter((p) => !shownPref || shownPref.includes(p));
   const [sel, setSel] = useState([]); // [{ prop, t }]
+  const selRef = useRef(sel);
+  selRef.current = sel;
   const [view, setView] = useState(null); // [t0, t1] clip-local; null = fit
   const [marquee, setMarquee] = useState(null);
   const [hover, setHover] = useState(null);
@@ -319,6 +341,7 @@ export function GraphEditor({ tab }) {
       tab.preview((d, ds) => {
         const c = ds.clips.find((x) => x.id === clip.id);
         if (!c) return;
+        editJoined(c, () => {
         const byProp = {};
         for (const k of keys) (byProp[k.prop] || (byProp[k.prop] = [])).push(k);
         for (const [p, ks] of Object.entries(byProp)) {
@@ -330,10 +353,11 @@ export function GraphEditor({ tab }) {
           for (const k of moving) {
             const base = v0[keyId(p, k.t)];
             k.t = clamp(k.t + dt, 0, c.duration);
-            if (dNorm) k.v = base + dNorm * scale;
+            if (dNorm && !pairOf(p)) k.v = base + dNorm * scale; // a joined Position moves in time only (as in After Effects)
           }
           c.keyframes[p] = list.filter((k) => moving.includes(k) || !moving.some((m) => Math.abs(m.t - k.t) < 0.5 / fps)).sort((a, b) => a.t - b.t);
         }
+        });
       });
     }, () => {
       frozen.current = null;
@@ -360,7 +384,9 @@ export function GraphEditor({ tab }) {
       const t = gg.tAt(mx), v = gg.vAt(my, h.prop);
       tab.preview((d, ds) => {
         const c = ds.clips.find((x) => x.id === clip.id);
-        const list = c?.keyframes?.[h.prop];
+        if (!c) return;
+        editJoined(c, () => {
+        const list = c.keyframes?.[h.prop];
         if (!list) return;
         bakeSegment(list, segI);
         const a = list[segI], b = list[segI + 1];
@@ -382,6 +408,18 @@ export function GraphEditor({ tab }) {
             else { bakeSegment(list, segI + 1); k.out = { ...(k.out || { influence: 1 / 3 }), speed: k.in.speed }; }
           }
         }
+        // several keyframes selected: they all take this shape (the same side, scaled to each segment), as in After Effects
+        const keyI = h.side === 'out' ? segI : segI + 1;
+        const shape = sideShape(list, keyI, h.side);
+        if (shape) {
+          for (const sk of selRef.current) {
+            const l2 = c.keyframes[sk.prop];
+            const j = l2 ? l2.findIndex((k) => Math.abs(k.t - sk.t) < 0.5 / fps) : -1;
+            if (j < 0 || (sk.prop === h.prop && j === keyI)) continue;
+            setSide(l2, j, h.side, shape);
+          }
+        }
+        });
       });
     }, () => { frozen.current = null; tab.end('Adjust keyframe ease'); setTick((n) => n + 1); });
   };
@@ -413,12 +451,21 @@ export function GraphEditor({ tab }) {
     tab.apply(label, (d, ds) => {
       const c = ds.clips.find((x) => x.id === clip.id);
       if (!c) return false;
-      fn(c);
-      return undefined;
+      return editJoined(c, () => fn(c)) === false ? false : undefined;
     });
   };
   const ease = (kind) => applyAll({ easy: 'Easy ease', easyIn: 'Easy ease in', easyOut: 'Easy ease out', linear: 'Linear keyframes', hold: 'Hold keyframes' }[kind], (c) => setKeyframeInterp(c, sel, kind, fps));
-  const remove = () => { applyAll(sel.length > 1 ? 'Delete keyframes' : 'Delete keyframe', (c) => deleteKeyframes(c, sel, fps)); setSel([]); };
+  // a joined Position's keyframe is X's and Y's: both go
+  const remove = () => {
+    const keys = sel.flatMap((k) => { const pair = pairOf(k.prop); return pair ? [{ prop: pair.a, t: k.t }, { prop: pair.b, t: k.t }] : [k]; });
+    tab.apply(sel.length > 1 ? 'Delete keyframes' : 'Delete keyframe', (d, ds) => { const c = ds.clips.find((x) => x.id === clip.id); if (!c) return false; deleteKeyframes(c, keys, fps); return undefined; });
+    setSel([]);
+  };
+  const preset = (name) => {
+    const p = PRESETS.flatMap((g) => g.items).find((x) => x[0] === name);
+    if (!p || !sel.length) return;
+    applyAll(`Ease: ${p[0]}`, (c) => (applyPreset(c, sel, p, fps) ? undefined : false));
+  };
   const selectAll = () => setSel(shown.flatMap((p) => clip.keyframes[p].map((k) => ({ prop: p, t: k.t }))));
 
   const onKey = (e) => {
@@ -465,6 +512,11 @@ export function GraphEditor({ tab }) {
         <button disabled=${!sel.length} title="Easy ease out (Alt+F9)" onClick=${() => ease('easyOut')}>Out</button>
         <button disabled=${!sel.length} title="Linear" onClick=${() => ease('linear')}>Linear</button>
         <button disabled=${!sel.length} title="Hold — jump to the next value" onClick=${() => ease('hold')}>Hold</button>
+        <select class="graph-presets" disabled=${!sel.length} value="" title="Ease presets: a curve for the selected keyframes (from each to the next; between them when several are selected)"
+          onChange=${(e) => { const v = e.target.value; e.target.value = ''; preset(v); }}>
+          <option value="">Presets…</option>
+          ${PRESETS.map((g) => html`<optgroup label=${g.group}>${g.items.map((p) => html`<option value=${p[0]}>${p[0]}</option>`)}</optgroup>`)}
+        </select>
       </div>
       <${IconButton} icon="expand" size=${13} title="Fit (F)" onClick=${() => setView(null)} />
       <${IconButton} icon="trash" size=${13} title="Delete selected keyframes (Del)" disabled=${!sel.length} onClick=${remove} />
@@ -479,8 +531,10 @@ export function GraphEditor({ tab }) {
             <input type="checkbox" checked=${shown.includes(p)} onChange=${() => toggleProp(p)} />
             <i style=${{ background: meta(p).color }}></i>
             <span class="graph-prop-name" onClick=${(e) => { e.preventDefault(); solo(p); }}>${meta(p).label}</span>
-            <span class="graph-prop-val">${fmt(evalKeyframes(clip.keyframes[p], lt, 0), p)}</span>
+            <span class="graph-prop-val">${pairOf(p) ? `${evalKeyframes(real.keyframes[pairOf(p).a], lt, 0).toFixed(0)}, ${evalKeyframes(real.keyframes[pairOf(p).b], lt, 0).toFixed(0)}` : fmt(evalKeyframes(clip.keyframes[p], lt, 0), p)}</span>
           </label>`)}
+          ${splittable ? html`<label class="graph-prop is-sep" title=${joined.length || separate ? 'Show Position X and Y as two curves, each with its own ease' : 'Position X and Y have keyframes at different times, so they are shown as two'}>
+            <input type="checkbox" checked=${!!separate || !joined.length} disabled=${!separate && !joined.length} onChange=${() => tab.ui.set({ graphSeparate: !separate })} /><span>Separate dimensions</span></label>` : null}
           <div class="graph-hint">${sel.length ? `${sel.length} selected · F9 easy ease · Del` : 'Click or box-select keyframes · drag to move · drag handles to ease · Alt-drag links both sides'}</div>
         </div>
         <div class="graph-canvas" ref=${wrapRef}>
