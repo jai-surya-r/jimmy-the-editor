@@ -51,7 +51,7 @@ try {
   for (let i = 0; i < 100; i++) { if (await page.call(() => !!window.__jimmy).catch(() => false)) break; await sleep(200); }
   await page.call((pid) => { window.__jimmy.openProject(pid); }, id);
   for (let i = 0; i < 100; i++) { if (await page.call(() => !!document.querySelector('[data-lane="v1"]')).catch(() => false)) break; await sleep(200); }
-  await page.call(() => { const t = window.__jimmy.activeTab(); t.ui.set({ pps: 60, scrollX: 0, tool: 'select' }); });
+  await page.call(() => { const t = window.__jimmy.activeTab(); t.ui.set({ pps: 35, scrollX: 0, tool: 'select' }); });
   await sleep(400);
   const shot = async (name) => { if (!SHOTS) return; const { data } = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(data, 'base64')); };
   const mouse = (type, x, y, extra = {}) => page.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, ...extra });
