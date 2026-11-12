@@ -50,13 +50,49 @@ Do it in this order:
 When done, tell me where the .aep is, list honestly anything that could not be matched exactly (an effect with no After Effects equivalent, a missing font), and remind me that once I have rendered it from After Effects I can ask you to put the render on the timeline in place of the HTML graphic.`;
 }
 
+// Built live in After Effects through "vedit ae …" (server/aehost.js, with MotionPilot's helpers and rules): planned
+// the way a motion designer would build it, not traced from the web page frame by frame.
+export function aeLivePrompt(tab, clips, folder) {
+  const seq = tab.seq;
+  const first = clips[0].start;
+  const many = clips.length > 1;
+  const lines = clips.map((c, i) => {
+    const m = tab.mediaById[c.media];
+    const mo = m.motion;
+    return `${i + 1}. "${c.name || m.name}": media id ${m.id}, source ${mo.src}; ${mo.width || m.width || 1920}×${mo.height || m.height || 1080}, ${fps(m)} fps, `
+      + `${secs(mo.duration || m.duration)} s long; at ${secs(c.start - first)} s from the first selected clip, ${secs(c.duration)} s used from ${secs(c.in || 0)} s`
+      + `${c.speed && c.speed !== 1 ? ` at ${c.speed}× speed` : ''}; params ${JSON.stringify(mo.params || {})}${mo.edit ? '; it has Motion-tab edits (the "edit" block of this media item in project.json)' : ''}.`;
+  });
+  const name = many ? `${seq.name} motion graphics` : (clips[0].name || tab.mediaById[clips[0].media].name);
+  return `Rebuild ${many ? `these ${clips.length} motion graphics` : 'this motion graphic'} from sequence "${seq.name}" in After Effects, the way a senior motion designer would build it by hand, and save it as "${folder}/${name}.aep".
+
+${lines.join('\n')}
+
+You drive After Effects directly with \`vedit ae …\` commands. Start with \`vedit ae guide\` and follow it: its tools, motion rules and AE.* helpers.
+
+1. UNDERSTAND. Read each graphic's HTML completely (CSS, scripts, assets) and its media item in project.json (params, and the "edit" block: the user's Motion-tab changes on top of the HTML). Render reference stills with \`vedit motion frame <media id> <times…>\` (start, end, every key moment, all in one call) and Read them.
+2. BREAK IT DOWN before building. Write in the chat, short: how this would be made in After Effects — compositions and precomps, the layer list (role names in whole words), and for every animation the native way to do it. The HTML is evidence of the look and timing, not a structure to copy:
+   - each move = 2 keyframes (start, end) with an ease that matches the GSAP/CSS ease (AE.keys / AE.ease presets, or speed + influence); never a key per frame. Code-driven motion (motion.onSeek, loops, wiggles, counters) = an expression, not baked keys.
+   - text = ONE text layer per line or block, with real font, size, tracking, leading; per-letter or per-word animation = a Text Animator (range selector, offset/stagger), never one layer per letter.
+   - choppy / stepped / low-frame-rate motion (steps(), posterized time, "16 fps" looks) = a Posterize Time effect on an adjustment layer above (or posterizeTime() in an expression), never doubled keys.
+   - staggers = AE.stagger / layer offsets or a text animator; repeated elements = one rigged layer duplicated or an index expression.
+   - shapes = shape layers (rounded rectangles, fills, strokes, gradients), masks/clip-path = masks or track mattes, blur/shadow/blend = the AE effects and modes; images and video imported from their real paths.
+   - params that are text or colours = editable (Essential Graphics or a CTRL null with sliders) where it helps.
+3. BUILD it live in small \`vedit ae run\` steps. First create ONE composition named "${name}"${many ? ' (the sequence\'s size and frame rate) holding each graphic as a precomp at its offset, trimmed and time-stretched as above' : ' with the graphic\'s exact size, frame rate and duration'} and make it active with .openInViewer(); work only inside it.
+4. CHECK with \`vedit ae frame <times…>\` at the same times as the Jimmy stills (one call, one proof sheet), compare side by side, fix by adjusting eases and values (never by adding keys), check again.
+5. SAVE with \`vedit ae save "${folder}/${name}.aep"\` (from the project folder). Don't change the HTML, project.json or the timeline.
+
+Finish with: where the .aep is, the breakdown in one line per layer, and anything that could not be matched (missing font, an effect with no After Effects equivalent).`;
+}
+
 export async function askConvertToAE(tab, ids) {
   const clips = motionClips(tab, ids);
   if (!clips.length) return;
-  let folder = '5_Projects/3_After_Effects';
-  try { folder = (await get(`/api/p/${tab.projectId}/ae-folder`)).rel || folder; } catch { /* default */ }
+  let info = {};
+  try { info = await get(`/api/p/${tab.projectId}/ae-folder`); } catch { /* defaults */ }
+  const folder = info.rel || '5_Projects/3_After_Effects';
+  const ae = info.app || app.get().server?.afterEffects || 'After Effects';
   const { sendToClaude } = await import('./ClaudePanel.js');
-  let ae = app.get().server?.afterEffects || 'After Effects';
-  try { ae = (await get(`/api/p/${tab.projectId}/ae-folder`)).app || ae; } catch { /* as known */ }
-  if (await sendToClaude(tab, aePrompt(tab, clips, folder, ae), tab.seq.id)) notify(`Claude is converting ${clips.length > 1 ? `${clips.length} motion graphics` : 'the motion graphic'} to an After Effects project (${folder})`, 'claude');
+  const prompt = info.live ? aeLivePrompt(tab, clips, folder) : aePrompt(tab, clips, folder, ae);
+  if (await sendToClaude(tab, prompt, tab.seq.id)) notify(`Claude is ${info.live ? 'building' : 'converting'} ${clips.length > 1 ? `${clips.length} motion graphics` : 'the motion graphic'} in After Effects (${folder})`, 'claude');
 }

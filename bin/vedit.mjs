@@ -573,6 +573,28 @@ const commands = {
       console.log(`Created ${r.ids.length} motion graphics: ${r.ids.join(', ')} (rendering in the background — vedit motion render all)`);
     } else die(`unknown motion command "${sub}". Try: vedit help`);
   },
+  // vedit ae <state|run|frame|info|inspect|skill|guide|save> — build in After Effects (server/aehost.js)
+  async ae() {
+    const sub = pos[0];
+    const body = { op: sub, chat: CHAT_KEY || '', comp: opts.comp };
+    if (sub === 'run') {
+      body.script = pos[1] ? fs.readFileSync(path.resolve(pos[1]), 'utf8') : (!process.stdin.isTTY ? fs.readFileSync(0, 'utf8') : '');
+      if (!body.script.trim()) die("usage: vedit ae run <file.jsx>  or  vedit ae run <<'JSX' … JSX");
+    } else if (sub === 'state') Object.assign(body, { full: !!opts.full, layer: opts.layer });
+    else if (sub === 'frame') {
+      body.times = pos.slice(1).map(parseFloat);
+      if (body.times.some((t) => !Number.isFinite(t))) die('usage: vedit ae frame <seconds…>');
+      if (dir) body.out = path.join(layoutFor(dir).afterEffects || dir, '_check');
+    } else if (sub === 'info') body.query = pos[1] || '';
+    else if (sub === 'inspect') Object.assign(body, { layer: pos[1], path: opts.path, depth: opts.depth });
+    else if (sub === 'skill') { if (!pos[1]) die('usage: vedit ae skill <name> [section]'); Object.assign(body, { query: pos[1], path: pos[2] }); }
+    else if (sub === 'save') { if (!pos[1]) die('usage: vedit ae save <file.aep>'); body.file = path.resolve(pos[1]); }
+    else if (sub !== 'guide') die('usage: vedit ae state | run | frame | info | inspect | skill | guide | save');
+    const r = await call('POST', '/api/ae', body);
+    console.log(r.text);
+    if (!r.ok) process.exit(1);
+  },
+
   async focus() {
     const f = focus();
     console.log(f ? JSON.stringify(f, null, 2) : 'No editor focus recorded yet.');
@@ -622,7 +644,8 @@ const commands = {
   vedit motion set <id|name> key=value… [--params '{json}'] [--replace] [--duration s]   (re-renders, waits)
   vedit motion frame <id|name> <seconds…> [key=value…] [--full | --scale 0.5]   render stills of the composition → PNG paths
   vedit motion render <id|name|all> [--force]   wait for renders; shows errors and page console messages
-  vedit motion batch <id|name> <rows.csv|rows.json> [--folder Name]   one graphic per row (columns = params, "name")`);
+  vedit motion batch <id|name> <rows.csv|rows.json> [--folder Name]   one graphic per row (columns = params, "name")
+  vedit ae guide | state | run | frame | info | inspect | skill | save   build in After Effects (read "vedit ae guide" first)`);
   },
 };
 

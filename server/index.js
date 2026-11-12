@@ -20,6 +20,7 @@ import { listSnapshots, takeSnapshot, restoreSnapshot } from './snapshots.js';
 import { getTranscript, saveTranscript } from './transcripts.js';
 import { audioLag } from './audiosync.js';
 import { agentStatus, installAgent, installJob, startCodexLogin, codexLoginState, afterEffectsApp } from './agents.js';
+import { aeCall, aeLive } from './aehost.js';
 import { listAccounts, addProfile, removeProfile, startLogin, getLogin, sendLoginCode, cancelLogin, cancelAllLogins, signOut } from './accounts.js';
 import { MotionService, MOTION_CDNS, injectRuntime, decodeCfg, readConfigBlock, mergedParams, runtimeFile } from './motion.js';
 import { parseCodeValues, parseCssVars, applyCodeValues } from './motionparse.js';
@@ -450,7 +451,9 @@ route('POST', '/api/storage/clear', async (req) => {
 });
 
 // where this project keeps After Effects projects (relative to its folder), for "convert to AE project"
-route('GET', '/api/p/:id/ae-folder', async (_req, { id }) => { const h = await needProject(id); return { rel: toPosix(path.relative(h.dir, h.layout.afterEffects)), template: !!h.layout.template, app: afterEffectsApp() }; });
+route('GET', '/api/p/:id/ae-folder', async (_req, { id }) => { const h = await needProject(id); return { rel: toPosix(path.relative(h.dir, h.layout.afterEffects)), template: !!h.layout.template, app: afterEffectsApp(), live: aeLive() }; });
+// Jimmy's own connection to After Effects (server/aehost.js), for "vedit ae …"
+route('POST', '/api/ae', async (req) => aeCall(await readJsonBody(req)));
 route('GET', '/api/p/:id', async (_req, { id }) => {
   const h = await needProject(id);
   prerender.open(h);
