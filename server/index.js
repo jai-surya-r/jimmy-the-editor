@@ -13,7 +13,7 @@ import { TerminalManager, listClaudeProfiles } from './terminals.js';
 import { projectChats, renameChat, moveChatName, adoptChats } from './chathistory.js';
 import { codexSessions } from './codex.js';
 import { ChatManager } from './chats.js';
-import { chatLinks, linkedSequence, setChatLink, moveChatLink, healChatLinks } from './chatlinks.js';
+import { chatLinks, freshSequences, linkedSequence, setChatLink, moveChatLink, healChatLinks } from './chatlinks.js';
 import { RenderManager } from './render.js';
 import { PrerenderManager } from './prerender.js';
 import { listSnapshots, takeSnapshot, restoreSnapshot } from './snapshots.js';
@@ -21,6 +21,7 @@ import { getTranscript, saveTranscript } from './transcripts.js';
 import { audioLag } from './audiosync.js';
 import { agentStatus, installAgent, installJob, startCodexLogin, codexLoginState, afterEffectsApp } from './agents.js';
 import { aeCall, aeLive } from './aehost.js';
+import { missingMedia, relinkMedia } from './relink.js';
 import { listAccounts, addProfile, removeProfile, startLogin, getLogin, sendLoginCode, cancelLogin, cancelAllLogins, signOut } from './accounts.js';
 import { MotionService, MOTION_CDNS, injectRuntime, decodeCfg, readConfigBlock, mergedParams, runtimeFile } from './motion.js';
 import { parseCodeValues, parseCssVars, applyCodeValues } from './motionparse.js';
@@ -77,7 +78,8 @@ const projects = new ProjectManager({ media, emit: emitProject });
 const terminals = new TerminalManager({ port: PORT, emit: emitProject });
 const chats = new ChatManager({
   port: PORT, emit: emitProject, accountOf: (id) => accountFor(id), agentOf: (id) => agentFor(id),
-  linkOf: (id, sessionId) => { const h = projects.handles.get(id); return h ? linkedSequence(h, sessionId) : null; },
+  // (a chat started for a sequence has no id until its first reply: linkSeq names that sequence till then)
+  linkOf: (id, sessionId, linkSeq) => { const h = projects.handles.get(id); return h ? linkedSequence(h, sessionId) || (linkSeq && h.doc?.sequences.find((x) => x.id === linkSeq)) || null : null; },
   // a chat learned its session id: link it if it was started for a sequence, or carry its link over to the new id
   onSession: async (s, prev) => {
     const h = projects.handles.get(s.projectId);
@@ -90,7 +92,7 @@ const chats = new ChatManager({
   },
 });
 function emitLinks(h) {
-  emitProject(h.id, { type: 'chat-links', projectId: h.id, links: chatLinks(h) });
+  emitProject(h.id, { type: 'chat-links', projectId: h.id, links: chatLinks(h), fresh: freshSequences(h) });
   chats.emitLive(h.id);
 }
 const motion = new MotionService({ media, port: PORT, emitAll });
@@ -462,7 +464,7 @@ route('GET', '/api/p/:id', async (_req, { id }) => {
     healChatLinks(h).then((added) => added && emitLinks(h)).catch((err) => console.warn('[chat links]', err.message));
   }
   return { ...h.snapshot(), terminal: terminals.info(id), chat: chats.info(id), fonts: (await projectFontsCss(h)).families, prerender: prerender.info(id),
-    chatLinks: chatLinks(h), chatsLive: chats.live(id) };
+    chatLinks: chatLinks(h), chatFresh: freshSequences(h), chatsLive: chats.live(id) };
 });
 route('PUT', '/api/p/:id/project', async (req, { id }) => {
   const h = await needProject(id);
@@ -559,6 +561,19 @@ route('POST', '/api/p/:id/media/:mid/proxy', async (_req, { id, mid }) => {
   const h = await needProject(id);
   media.requestProxy(h, mid);
   return { ok: true };
+});
+// footage that isn't where project.json says (made on another computer, a moved drive): find one, the rest follow
+route('GET', '/api/p/:id/missing', async (_req, { id }) => ({ missing: missingMedia(await needProject(id)) }));
+route('POST', '/api/p/:id/relink', async (req, { id }) => {
+  const h = await needProject(id);
+  const body = await readJsonBody(req);
+  let r;
+  try { r = relinkMedia(h, String(body.mediaId || ''), body.path); } catch (err) { throw httpError(err.status || 400, err.message); }
+  const c = await h.commit(r.doc, { origin: 'relink' });
+  if (c?.error || c?.conflict) throw httpError(409, c.error || 'The project changed: try again');
+  h._mediaSig = null;
+  media.sync(h).catch((err) => console.warn('[relink]', err.message));
+  return { linked: r.linked, missing: missingMedia(h) };
 });
 route('POST', '/api/p/:id/media/refresh', async (req, { id }) => {
   const h = await needProject(id);
@@ -1050,6 +1065,15 @@ route('POST', '/api/p/:id/chat/send', async (req, { id }) => {
     chats.emitLive(id);
     return { ok: true, sessionId: body.sessionId };
   }
+  // to a sequence whose chat was made on another computer (a shared project): a new chat for it, in the background
+  if (body.freshSequence && agentFor(id) !== 'codex' && freshSequences(h).includes(body.freshSequence)) {
+    const kit = await kitLaunch(h.doc?.ip).catch(() => null);
+    const s = chats.startBackgroundFor(id, h.dir, body.freshSequence, { model: body.model, effort: body.effort, permissionMode: body.permissionMode, configDir: accountFor(id), kit });
+    if (s.busy || s.compacting) throw httpError(409, 'That chat is still working: send this when it finishes.');
+    if (!chats.sendTo(s, body.text || '', body.files)) throw httpError(409, 'Nothing to send.');
+    chats.emitLive(id);
+    return { ok: true };
+  }
   // prompts sent from elsewhere in the editor (review comments, "Ask Claude to fix") start a chat if needed
   if (!chats.info(id).running) {
     const kit = await kitLaunch(h.doc?.ip).catch(() => null);
@@ -1067,7 +1091,7 @@ route('GET', '/api/p/:id/chats', async (_req, { id }) => {
   return { chats: projectChats(h.dir).slice(0, 200), current: chats.info(id).sessionId || null, live: chats.live(id) };
 });
 // sequence -> chat links: { links: { seqId: sessionId } }; POST { sequenceId, sessionId } (sessionId null unlinks)
-route('GET', '/api/p/:id/chat-links', async (_req, { id }) => ({ links: chatLinks(await needProject(id)) }));
+route('GET', '/api/p/:id/chat-links', async (_req, { id }) => { const h = await needProject(id); return { links: chatLinks(h), fresh: freshSequences(h) }; });
 route('POST', '/api/p/:id/chat-links', async (req, { id }) => {
   const h = await needProject(id);
   const body = await readJsonBody(req);
@@ -1075,7 +1099,7 @@ route('POST', '/api/p/:id/chat-links', async (req, { id }) => {
   if (body.sessionId != null && !/^[\w-]+$/.test(body.sessionId)) throw httpError(400, 'Bad chat id');
   await setChatLink(h, body.sequenceId, body.sessionId || null);
   emitLinks(h);
-  return { links: chatLinks(h) };
+  return { links: chatLinks(h), fresh: freshSequences(h) };
 });
 // for vedit inside a chat: which chat it runs in and the sequence that chat works on; POST links it to one
 route('GET', '/api/chat-self', async (_req, _p, url) => {

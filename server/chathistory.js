@@ -47,6 +47,15 @@ function profiles() {
   return list;
 }
 
+// the ids of the chats saved on this computer for this folder (any account): file names only, nothing read
+export function localChatIds(cwd) {
+  const ids = new Set();
+  for (const p of profiles()) {
+    try { for (const f of fs.readdirSync(historyDir(p.dir, cwd))) if (f.endsWith('.jsonl')) ids.add(f.slice(0, -6)); } catch { /* none here */ }
+  }
+  return ids;
+}
+
 // the chat's first prompt, as its title (read from the start of the file only; cached per file)
 const titles = new Map();
 function titleOf(file) {

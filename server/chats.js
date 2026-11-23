@@ -168,6 +168,19 @@ export class ChatManager {
     return s;
   }
 
+  // A new chat for a sequence, in the background (its chat was made on another computer): linked to the sequence
+  // as soon as it has an id. The one already starting for that sequence is reused.
+  startBackgroundFor(projectId, cwd, seqId, { model = '', effort = '', permissionMode = 'default', configDir, kit } = {}) {
+    const starting = [...(this.background.get(projectId) || [])].find((x) => x.running && x.linkSeq === seqId);
+    if (starting) return starting;
+    const s = this.spawn(projectId, cwd, { model, effort, permissionMode, configDir, kit });
+    s.linkSeq = seqId;
+    if (!this.background.has(projectId)) this.background.set(projectId, new Set());
+    this.background.get(projectId).add(s);
+    this.emitLive(projectId);
+    return s;
+  }
+
   spawn(projectId, cwd, { resumeId, model, effort, permissionMode, configDir, kit }) {
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
       '--include-partial-messages', '--permission-prompt-tool', 'stdio'];
@@ -550,7 +563,7 @@ export class ChatManager {
     const first = users.find((m) => typeof m.message?.content === 'string' || m.message?.content?.some?.(said))?.message.content;
     const text = typeof first === 'string' ? first : Array.isArray(first) ? first.find(said)?.text : '';
     this.emit(s.projectId, { type: 'chat-notice', projectId: s.projectId, kind, sessionId: s.sessionId, shown: this.shown(s),
-      sequence: this.linkOf(s.projectId, s.sessionId)?.name || null,
+      sequence: this.linkOf(s.projectId, s.sessionId, s.linkSeq)?.name || null,
       title: chatName(s.sessionId) || String(text || 'Chat').replace(/\s+/g, ' ').trim().slice(0, 60) });
     if (!this.shown(s) && kind !== 'ask') this.idleLater(s);
     this.emitLive(s.projectId);
@@ -650,7 +663,7 @@ export class ChatManager {
     if (body) content.push({ type: 'text', text: body });
     if (!content.length) return false;
     // a chat linked to a sequence is reminded on every message which one it works on (the panel hides the note)
-    const seq = this.linkOf(s.projectId, s.sessionId);
+    const seq = this.linkOf(s.projectId, s.sessionId, s.linkSeq);
     if (seq && !/^\s*\//.test(body)) {
       content.unshift({ type: 'text', text: `<jimmy-sequence id="${seq.id}" name="${String(seq.name).replace(/"/g, "'")}">This chat works only on sequence "${seq.name}" (${seq.id}). Change only that sequence in project.json and leave every other sequence exactly as it is: other chats are editing them.</jimmy-sequence>` });
     }

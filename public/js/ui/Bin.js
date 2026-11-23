@@ -406,7 +406,7 @@ function mediaBadge(tab, item, status, uses) {
   const mo = isMotion(item) ? status?.motion : null;
   if (mo?.state === 'rendering' || mo?.state === 'queued' || (isMotion(item) && !mo)) return html`<span class="bin-badge is-motion" title="Rendering the motion graphic">${mo?.state === 'rendering' ? `${Math.round((mo.progress || 0) * 100)}%` : 'queued'}</span>`;
   if (mo?.state === 'error') return html`<span class="bin-badge is-error" title=${mo.error}>error</span>`;
-  if (status?.exists === false) return html`<button class="bin-badge is-error is-reload" title="File not found: ${item.path}. Click to look again (e.g. after reconnecting the drive)" onClick=${(e) => { e.stopPropagation(); tab.reloadMedia(); }}><${Icon} name="refresh" size=${10} /> offline</button>`;
+  if (status?.exists === false) return html`<button class="bin-badge is-error is-reload" title="File not found: ${item.path}. Click to look again (a reconnected drive), or to locate it" onClick=${async (e) => { e.stopPropagation(); await tab.reloadMedia(); (await import('./relink.js')).checkMissing(tab); }}><${Icon} name="refresh" size=${10} /> offline</button>`;
   if (status?.error) return html`<button class="bin-badge is-error is-reload" title="${status.error}. Click to reload" onClick=${(e) => { e.stopPropagation(); tab.reloadMedia(); }}><${Icon} name="refresh" size=${10} /> error</button>`;
   if (status?.proxy === 'running' || status?.proxy === 'queued') return html`<span class="bin-badge" title="Making a preview proxy">${status.proxy === 'queued' ? 'queued' : `${Math.round((status.proxyProgress || 0) * 100)}%`}</span>`;
   if (status && !status.probed) return html`<span class="spinner spinner-xs"></span>`;

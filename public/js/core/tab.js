@@ -100,9 +100,11 @@ export class Tab {
         status: 'ready', dir: r.dir, doc: r.doc, rev: r.rev, reviews: r.reviews, reviewsRev: r.reviewsRev,
         mediaStatus: r.mediaStatus || {}, projectError: r.error, reviewsError: r.reviewsError,
         warnings: r.warnings || [], terminal: r.terminal, chat: r.chat, fonts: r.fonts || [], prerender: r.prerender || null,
-        chatLinks: r.chatLinks || {}, chatsLive: r.chatsLive || [],
+        chatLinks: r.chatLinks || {}, chatFresh: r.chatFresh || [], chatsLive: r.chatsLive || [],
       });
       this.ensureSequence();
+      // footage that isn't where the project says (made on another computer): offer to locate it, first thing
+      if (!this.missingChecked) { this.missingChecked = true; import('../ui/relink.js').then((m) => m.checkMissing(this)).catch(() => {}); }
       this.engine.seek(this.time.get().t);
     } catch (err) {
       this.store.set({ status: 'error', loadError: err.message });
@@ -149,7 +151,7 @@ export class Tab {
       case 'terminal': this.store.set({ terminal: msg.info }); return;
       case 'chat': this.store.set({ chat: msg.info }); return;
       case 'chats-live': this.store.set({ chatsLive: msg.live }); return;
-      case 'chat-links': this.store.set({ chatLinks: msg.links || {} }); return;
+      case 'chat-links': this.store.set({ chatLinks: msg.links || {}, chatFresh: msg.fresh || [] }); return;
       case 'notice': notify(msg.text, 'info', { timeout: 12000 }); return;
       case 'chat-notice': {
         // a chat finished (or waits for an answer): say so unless it is the one open in a visible panel

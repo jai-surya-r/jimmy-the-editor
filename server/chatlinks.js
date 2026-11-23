@@ -1,15 +1,22 @@
 // Which chat works on which sequence: sequence id -> Claude chat (session) id, one chat per sequence and one
-// sequence per chat. Kept in the project's state folder, so the links survive restarts. A linked chat gets
-// that sequence's messages and review comments, and keeps running in the background while another is shown.
+// sequence per chat on each computer. Kept in the project's state folder, so the links survive restarts. A linked
+// chat gets that sequence's messages and review comments, and keeps running in the background while another is shown.
+//
+// A shared project (a synced folder, a copy on a friend's computer) carries the links of every computer that
+// worked on it, but Claude's chats stay on the computer they were made on. So the file can hold several chats per
+// sequence ({ seqId: "id" } or { seqId: ["id", "id"] }), and each computer only uses the ones it has: a sequence
+// linked only to chats from elsewhere is "fresh" here (freshSequences): its next message starts a new chat for it.
+// Writing keeps the other computers' entries.
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJson, writeFileAtomic } from './util.js';
-import { projectChats, historyDir, adoptChats } from './chathistory.js';
+import { projectChats, historyDir, adoptChats, localChatIds } from './chathistory.js';
 import { layoutFor } from './layout.js';
 
 const file = (h) => path.join(h.layout.files, 'chat-links.json');
 // sequences unlinked by hand (sequence id -> { at, chat }), so healChatLinks doesn't link them again
 const unlinksFile = (h) => path.join(h.layout.files, 'chat-unlinks.json');
+const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : typeof v === 'string' ? [v] : []);
 
 // The links on disk; null when the file is there but can't be read right now (being written, a busy NAS):
 // a passing failure must never be taken for "no links" and then written back over them.
@@ -19,14 +26,47 @@ function readLinks(h) {
     return v && typeof v === 'object' ? v : {};
   } catch (err) { return err.code === 'ENOENT' ? {} : null; }
 }
+function readUnlinks(h) {
+  try { return JSON.parse(fs.readFileSync(unlinksFile(h), 'utf8')) || {}; } catch { return {}; }
+}
 
-export function chatLinks(h) {
+// the chats this computer has (looked up at most every few seconds) and the ones linked here since the start
+function mine(h) {
+  if (!h._mine) h._mine = new Set();
+  if (!h._known || Date.now() - h._known.at > 5000) h._known = { at: Date.now(), ids: localChatIds(h.dir) };
+  return (id) => h._mine.has(id) || h._known.ids.has(id);
+}
+
+function raw(h) {
   if (!h._chatLinks) {
     const links = readLinks(h);
-    if (!links) return {}; // asked again next time
+    if (!links) return null; // asked again next time
     h._chatLinks = links;
+    h._unlinks = readUnlinks(h);
   }
   return h._chatLinks;
+}
+
+// this computer's links: { seqId: sessionId }
+export function chatLinks(h) {
+  const all = raw(h);
+  if (!all) return {};
+  const here = mine(h);
+  const out = {};
+  for (const [k, v] of Object.entries(all)) {
+    const id = ids(v).find(here);
+    if (id) out[k] = id;
+  }
+  return out;
+}
+
+// sequences linked only to chats made on other computers (and not unlinked by hand): each gets a new chat here
+export function freshSequences(h) {
+  const all = raw(h);
+  if (!all || !h.doc) return [];
+  const here = mine(h);
+  const un = h._unlinks || {};
+  return h.doc.sequences.map((s) => s.id).filter((k) => ids(all[k]).length && !ids(all[k]).some(here) && !un[k]);
 }
 
 export function linkedSequence(h, sessionId) {
@@ -37,33 +77,47 @@ export function linkedSequence(h, sessionId) {
 }
 
 async function save(h, links, unlinked = []) {
-  h._chatLinks = links;
+  const out = {};
+  for (const [k, v] of Object.entries(links)) {
+    const list = [...new Set(ids(v))];
+    if (list.length) out[k] = list.length === 1 ? list[0] : list; // one chat: the plain form older versions read
+  }
+  h._chatLinks = out;
   await fs.promises.mkdir(h.layout.files, { recursive: true });
-  await writeFileAtomic(file(h), JSON.stringify(links, null, 1));
-  const linked = Object.keys(links);
+  await writeFileAtomic(file(h), JSON.stringify(out, null, 1));
   const un = (await readJson(unlinksFile(h), {})) || {};
   const before = JSON.stringify(un);
-  for (const k of linked) delete un[k];
+  for (const k of Object.keys(chatLinks(h))) delete un[k];
   for (const [k, chat] of unlinked) un[k] = { at: Date.now(), chat };
+  h._unlinks = un;
   if (JSON.stringify(un) !== before) await writeFileAtomic(unlinksFile(h), JSON.stringify(un, null, 1));
 }
 
-// link a sequence to a chat (sessionId null: unlink the sequence); a chat linked elsewhere moves here
+// link a sequence to a chat (sessionId null: unlink the sequence); a chat linked elsewhere moves here. Only this
+// computer's chats change: the other computers' links stay in the file.
 export async function setChatLink(h, seqId, sessionId) {
-  const current = h._chatLinks || readLinks(h);
+  const current = raw(h);
   if (!current) throw new Error("The project's chat links can't be read right now: try again in a moment");
-  const links = { ...current };
+  const here = mine(h);
+  const links = {};
   const unlinked = [];
-  for (const [k, v] of Object.entries(links)) {
-    if (k === seqId || (sessionId && v === sessionId)) {
-      delete links[k];
-      if (k !== seqId || !sessionId) unlinked.push([k, v]);
+  for (const [k, v] of Object.entries(current)) {
+    const keep = [];
+    for (const id of ids(v)) {
+      const drop = (k === seqId && here(id)) || (sessionId && id === sessionId);
+      if (!drop) keep.push(id);
+      else if (k !== seqId || !sessionId) unlinked.push([k, id]);
     }
+    if (keep.length) links[k] = keep;
   }
   if (seqId && !sessionId && !unlinked.some(([k]) => k === seqId)) unlinked.push([seqId, null]);
-  if (seqId && sessionId) links[seqId] = sessionId;
+  if (seqId && sessionId) {
+    h._mine = h._mine || new Set();
+    h._mine.add(sessionId);
+    links[seqId] = [...ids(links[seqId]), sessionId];
+  }
   await save(h, links, unlinked);
-  return links;
+  return chatLinks(h);
 }
 
 // a resumed chat that came back with a new session id keeps its sequence
@@ -74,13 +128,13 @@ export async function moveChatLink(h, fromId, toId) {
 
 // Links that went missing (an older version could write over them when the file couldn't be read; a project
 // folder copied from elsewhere brings its own file) come back: every message to a linked chat starts with a
-// <jimmy-sequence id="…"> note, so a sequence without a chat gets the chat whose latest note names it. A sequence
+// <jimmy-sequence id="…"> note, so a sequence without a chat here gets the chat whose latest note names it. A sequence
 // unlinked by hand is left alone unless a chat used after that names it. The same project on another path (see
 // adoptChats) lends its links first: a chat linked there but never written to has no note. Returns true when links were added.
 export async function healChatLinks(h) {
-  chatLinks(h);
-  if (!h.doc || !h._chatLinks) return false; // the file can't be read right now
-  const links = h._chatLinks;
+  const all = raw(h);
+  if (!h.doc || !all) return false; // the file can't be read right now
+  const links = chatLinks(h);
   const open = new Set(h.doc.sequences.map((s) => s.id).filter((id) => !links[id]));
   if (!open.size) return false;
   const used = new Set(Object.values(links));
@@ -90,8 +144,9 @@ export async function healChatLinks(h) {
   const known = new Set(projectChats(h.dir).map((c) => c.id));
   for (const other of others) {
     const theirs = (await readJson(path.join(layoutFor(other).files, 'chat-links.json'), {}).catch(() => null)) || {};
-    for (const [seqId, chat] of Object.entries(theirs)) {
-      if (!open.has(seqId) || found[seqId] || unlinks[seqId] || used.has(chat) || !known.has(chat)) continue;
+    for (const [seqId, v] of Object.entries(theirs)) {
+      const chat = ids(v).find((id) => known.has(id) && !used.has(id));
+      if (!chat || !open.has(seqId) || found[seqId] || unlinks[seqId]) continue;
       found[seqId] = chat;
       used.add(chat);
     }
@@ -105,8 +160,11 @@ export async function healChatLinks(h) {
     found[seqId] = c.id;
     used.add(c.id);
   }
-  if (!Object.keys(found).length || h._chatLinks !== links) return false;
-  await save(h, { ...links, ...found });
+  if (!Object.keys(found).length || h._chatLinks !== all) return false;
+  h._mine = h._mine || new Set();
+  const next = { ...all };
+  for (const [k, id] of Object.entries(found)) { h._mine.add(id); next[k] = [...ids(all[k]), id]; }
+  await save(h, next);
   console.log(`[chat links] ${h.doc.name}: linked again from the chats' sequence notes: ${Object.keys(found).length}`);
   return true;
 }

@@ -82,7 +82,10 @@ export function ReviewMode({ tab }) {
   const jobs = useStore(app, (s) => s.jobs);
   const versions = reviews?.versions || [];
   // the timeline is what Review shows unless a draft is picked
-  const picked = versions.find((v) => v.id === versionId);
+  // Review shows the sequence open in Edit: a version picked earlier for another sequence gives way to it
+  const pickedAny = versions.find((v) => v.id === versionId);
+  const picked = pickedAny && (!pickedAny.sequence || !seqId || pickedAny.sequence === seqId || !findSequence(doc, pickedAny.sequence)) ? pickedAny : null;
+  useEffect(() => { if (pickedAny && !picked) tab.ui.set({ reviewVersion: null }); }, [pickedAny, picked]);
   const version = picked || latestRound(versions, seqId);
   useEffect(() => { if (reviews && !picked && seqId && !latestRound(versions, seqId)) ensureRound(tab, seqId); }, [reviews, picked, seqId]);
   const running = Object.values(jobs).filter((j) => j.projectId === tab.projectId && j.kind === 'video' && !['done', 'error', 'canceled'].includes(j.status));
@@ -239,7 +242,7 @@ function VersionList({ tab, doc, versions, comments, current, running }) {
             ${g.list.map((v) => {
               const n = openCount(v);
               return html`<div class="version-card ${current?.id === v.id ? 'is-active' : ''}" role="button" tabindex="0" key=${v.id}
-                  onClick=${() => tab.ui.set({ reviewVersion: v.id })} onContextMenu=${(e) => menu(e, v)}>
+                  onClick=${() => { if (g.seqId && findSequence(doc, g.seqId) && g.seqId !== tab.ui.get().sequenceId) tab.setSequence(g.seqId); tab.ui.set({ reviewVersion: v.id }); }} onContextMenu=${(e) => menu(e, v)}>
                 <div class="version-top"><b>${v === g.live ? html`<${Icon} name="seq" size=${12} /> Timeline` : v.name}</b><span class="status-pill ${STATUS[v.status]?.cls}">${STATUS[v.status]?.label}</span>
                   <div class="spacer"></div>
                   <button class="icon-btn version-del" title=${isRound(v) ? 'Remove this round' : 'Remove from Review (the file stays)'} onClick=${(e) => { e.stopPropagation(); removeOne(v); }}><${Icon} name="x" size=${13} /></button>
@@ -656,11 +659,23 @@ function ScrubBar({ t, dur, comments, active, onSeek, onPick, fps, thumbUrl, v0 
   </div>`;
 }
 
+// The comment being typed, per project tab: it stays while you look at Edit or another version or sequence.
+const drafts = new Map(); // tab id -> { text, refs }
+function useDraft(tab, key, init) {
+  const [v, setV] = useState(() => drafts.get(tab.id)?.[key] ?? init);
+  const set = (x) => setV((prev) => {
+    const next = typeof x === 'function' ? x(prev) : x;
+    drafts.set(tab.id, { ...drafts.get(tab.id), [key]: next });
+    return next;
+  });
+  return [v, set];
+}
+
 function CommentsPanel({ tab, version, comments, fps, t, active, onPick, onAdd, tool, setTool, color, setColor, strokes, clearStrokes, pause }) {
   const [filter, setFilter] = useState('all');
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(tab, 'text', '');
   const [range, setRange] = useState(null);
-  const [refs, setRefs] = useState([]);
+  const [refs, setRefs] = useDraft(tab, 'refs', []);
   const [uploading, setUploading] = useState(0);
   const listRef = useRef(null);
   const fileRef = useRef(null);

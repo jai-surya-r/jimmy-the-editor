@@ -49,7 +49,7 @@ try {
   ok(cs.n3.t === 15, `a comment on a later clip moves with it (13 → ${cs.n3.t})`);
   ok(cs.n4.t === 5, `a resolved comment stays where it was (${cs.n4.t})`);
   console.log('vedit move');
-  execFileSync(process.execPath, [path.join(ROOT, 'bin', 'vedit.mjs'), 'move', 'n2', '6.5'], { cwd: GOLDEN_DIR, env: { ...process.env, CLAUDE_EDIT_PORT: '4455' } });
+  execFileSync(process.execPath, [path.join(ROOT, 'bin', 'vedit.mjs'), 'move', 'n2', '6.5'], { cwd: GOLDEN_DIR, env: { ...process.env, CLAUDE_EDIT_URL: 'http://127.0.0.1:4455' } }); // the test server only, never the Jimmy that is open
   for (let i = 0; i < 30; i++) { await sleep(200); p = await api('GET', `/api/p/${id}`); cs = Object.fromEntries(p.reviews.comments.map((c) => [c.id, c])); if (cs.n2.t !== 6) break; }
   ok(cs.n2.t === 6.5 && cs.n2.tEnd === 7.5, `moves a comment, keeping its range's length (${cs.n2.t}–${cs.n2.tEnd})`);
 } finally {

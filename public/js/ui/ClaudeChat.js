@@ -11,7 +11,7 @@ import { notify } from '../core/notify.js';
 import { timecode, clipEnd, trackLabel, findSequence } from '../core/model.js';
 import { markdown } from './markdown.js';
 import { openAccounts } from './accounts.js';
-import { currentSeqId, chatFor, seqForChat, liveState, linkChat } from './chatlinks.js';
+import { currentSeqId, chatFor, seqForChat, liveState, linkChat, isFresh } from './chatlinks.js';
 
 // Used until the CLI has reported its own model list (display names + effort levels) once.
 export const MODELS = [
@@ -120,10 +120,11 @@ export async function startChat(projectId, mode = 'new', sessionId, { linkSequen
 
 // Send a prompt from elsewhere in the editor (starts or continues the chat on the server if needed). With a
 // sessionId it goes to that chat (a sequence's linked chat), which works in the background: the panel stays put.
-export async function sendChatPrompt(projectId, text, { sessionId, files } = {}) {
+// freshSequence: a sequence whose chat is on another computer: a new chat for it starts, in the background
+export async function sendChatPrompt(projectId, text, { sessionId, files, freshSequence } = {}) {
   chatSession(projectId);
   const prefs = loadPref('chat.prefs', {});
-  await post(`/api/p/${projectId}/chat/send`, { text, files, sessionId: sessionId || undefined, mode: 'continue', model: prefs.model || '', codexModel: prefs.codexModel || '', effort: prefs.effort || '', permissionMode: prefs.permissionMode || 'default' });
+  await post(`/api/p/${projectId}/chat/send`, { text, files, sessionId: sessionId || undefined, freshSequence: freshSequence || undefined, mode: 'continue', model: prefs.model || '', codexModel: prefs.codexModel || '', effort: prefs.effort || '', permissionMode: prefs.permissionMode || 'default' });
 }
 
 // Where a message from the editor goes: the chat linked to the sequence you're on (seqId, default the current
@@ -139,9 +140,11 @@ export function useChatTarget(tab, seqIdArg) {
   const codex = (shown?.agent || 'claude') === 'codex';
   const sid = codex ? null : chatFor(tab, seqId);
   const shownSid = shown?.running ? shown.sessionId || null : null;
-  const away = !!sid && sid !== shownSid;
-  const st = away ? liveState(tab, sid) : { busy: !!(shown?.busy || shown?.compacting) };
-  return { seqId, seq, sid, shownSid, away, busy: st.busy, waiting: !!st.waiting, shownSeq: codex ? null : seqForChat(tab, shownSid), codex };
+  useStore(tab.store, (s) => s.chatFresh);
+  const fresh = !codex && !sid && isFresh(tab, seqId);
+  const away = (!!sid && sid !== shownSid) || fresh;
+  const st = fresh ? { busy: false } : away ? liveState(tab, sid) : { busy: !!(shown?.busy || shown?.compacting) };
+  return { seqId, seq, sid, shownSid, away, fresh, busy: st.busy, waiting: !!st.waiting, shownSeq: codex ? null : seqForChat(tab, shownSid), codex };
 }
 
 // ------------------------------------------------------------------ log → view items
@@ -703,7 +706,7 @@ export function ClaudeChat({ tab, chatsCount, onNew, onContinue, onHistory }) {
       setText('');
       setFiles([]);
       try {
-        await sendChatPrompt(pid, body, { sessionId: target.sid, files: sent });
+        await sendChatPrompt(pid, body, target.fresh ? { freshSequence: target.seqId, files: sent } : { sessionId: target.sid, files: sent });
         notify(`Sent to the "${name}" chat`, 'claude');
       } catch (err) { notify(err.message, 'error'); setText(body); }
       return;

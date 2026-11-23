@@ -10,7 +10,7 @@ import { app } from '../core/app.js';
 import { get, post } from '../core/api.js';
 import { notify } from '../core/notify.js';
 import { findSequence } from '../core/model.js';
-import { currentSeqId, chatFor, seqForChat, liveState, linkChat } from './chatlinks.js';
+import { currentSeqId, chatFor, seqForChat, liveState, linkChat, isFresh } from './chatlinks.js';
 
 const THEME = {
   background: '#0d0f14', foreground: '#e4e7ee', cursor: '#a898ff', cursorAccent: '#0d0f14',
@@ -129,6 +129,15 @@ export async function sendToClaude(tab, text, seqId) {
   const seq = seqId !== undefined ? seqId : currentSeqId(tab);
   const sid = chatFor(tab, seq);
   const shown = chatSession(tab.projectId).store.get().info;
+  if (!sid && shown?.agent !== 'codex' && isFresh(tab, seq)) {
+    // its chat is on another computer: a new chat for this sequence, here
+    const name = findSequence(tab.doc, seq)?.name || 'sequence';
+    try {
+      await sendChatPrompt(tab.projectId, text, { freshSequence: seq });
+      notify(`Sent to a new chat for "${name}"`, 'claude');
+      return true;
+    } catch (err) { notify(err.message, 'error'); return false; }
+  }
   if (sid && shown?.agent !== 'codex' && !(shown?.running && shown.sessionId === sid)) {
     const name = findSequence(tab.doc, seq)?.name || 'sequence';
     if (liveState(tab, sid).busy) { notify(`The "${name}" chat is still working: wait for it to finish`, 'error'); return false; }
@@ -253,7 +262,7 @@ export function ClaudePanel({ tab }) {
           ${sid ? html`<${IconButton} icon="pen" size=${12} title="Rename this chat" onClick=${() => setNaming(chatTitle || '')} />` : null}
           ${sid ? html`<${ChatSequencePicker} tab=${tab} sid=${sid} />` : null}`}
     </div>` : null}
-    ${view === 'chat' && agent !== 'codex' ? html`<${LinkedChats} tab=${tab} shownSid=${sid} onOpen=${(id) => chatStart('resume', id)} />` : null}
+    ${view === 'chat' && agent !== 'codex' ? html`<${LinkedChats} tab=${tab} shownSid=${sid} onOpen=${(id) => chatStart('resume', id)} onNew=${(seqId) => startChat(pid, 'new', null, { linkSequence: seqId }).catch((err) => notify(err.message, 'error'))} />` : null}
     ${view === 'chat'
       ? html`<div class="claude-body is-chat"><${ClaudeChat} key=${pid} tab=${tab} chatsCount=${info?.chats || 0}
           onNew=${() => chatStart('new')} onContinue=${() => chatStart('continue')} onHistory=${() => setHistory(true)} /></div>`
@@ -276,14 +285,19 @@ function ChatSequencePicker({ tab, sid }) {
 
 // The chats linked to sequences, with what each is doing. Clicking one shows it (a running chat comes back at
 // once); the rest keep working in the background.
-function LinkedChats({ tab, shownSid, onOpen }) {
+function LinkedChats({ tab, shownSid, onOpen, onNew }) {
   const links = useStore(tab.store, (s) => s.chatLinks) || {};
+  const fresh = useStore(tab.store, (s) => s.chatFresh) || [];
   const doc = useStore(tab.store, (s) => s.doc);
   const shownInfo = useStore(chatSession(tab.projectId).store, (s) => s.info);
   useStore(tab.store, (s) => s.chatsLive);
   const rows = Object.entries(links).map(([seqId, sid]) => ({ seq: doc && findSequence(doc, seqId), sid })).filter((r) => r.seq);
-  if (!rows.length) return null;
-  return html`<div class="claude-linked">${rows.map(({ seq, sid }) => {
+  // sequences whose chat is on another computer (a shared project): a new chat each, started on click or by their next message
+  const news = fresh.filter((k) => !links[k]).map((k) => doc && findSequence(doc, k)).filter(Boolean);
+  if (!rows.length && !news.length) return null;
+  return html`<div class="claude-linked">${news.map((seq) => html`<button key=${`new-${seq.id}`} class="claude-linked-chip is-fresh"
+      title=${`${seq.name}: its chat is on another computer. A new chat starts here with its next message, or click to start it now`}
+      onClick=${() => onNew(seq.id)}><i class="claude-linked-dot"></i>${seq.name}</button>`)}${rows.map(({ seq, sid }) => {
     const shown = sid === shownSid;
     const st = shown ? { live: true, busy: !!(shownInfo?.busy || shownInfo?.compacting), waiting: false } : liveState(tab, sid);
     const what = st.waiting ? 'needs your answer' : st.busy ? 'working' : st.live ? 'ready' : 'not started yet (starts with its next message)';

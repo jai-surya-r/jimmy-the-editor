@@ -20,6 +20,8 @@ export function chatFor(tab, seqId) {
   const sid = seqId ? linksOf(tab)[seqId] : null;
   return sid && findSequence(tab.doc, seqId) ? sid : null;
 }
+// a sequence whose chat was made on another computer (a shared project): its next message starts a new chat here
+export const isFresh = (tab, seqId) => !!seqId && !chatFor(tab, seqId) && (tab.store.get().chatFresh || []).includes(seqId) && !!findSequence(tab.doc, seqId);
 // the sequence a chat is linked to
 export function seqForChat(tab, sid) {
   if (!sid) return null;
@@ -56,7 +58,7 @@ export function chatMenuItems(tab, seqId) {
 export async function linkChat(tab, seqId, sid) {
   try {
     const r = await post(`/api/p/${tab.projectId}/chat-links`, { sequenceId: seqId, sessionId: sid || null });
-    tab.store.set({ chatLinks: r.links || {} });
+    tab.store.set({ chatLinks: r.links || {}, chatFresh: r.fresh || [] });
     return true;
   } catch (err) { notify(err.message, 'error'); return false; }
 }
