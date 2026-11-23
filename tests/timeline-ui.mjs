@@ -287,7 +287,13 @@ try {
   await shot('settings.png');
   await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-  ok(await page.call(() => { const c = document.querySelector('.viewer-canvas'); const d = c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data; return !!c.width && d[3] === 255 && !document.querySelector('.viewer-canvas-gl'); }), 'the preview draws with the classic compositor alone');
+  // (right after Settings closes the preview may still be redrawing on a slow machine: give it up to 2 s)
+  let drawn = false;
+  for (let i = 0; i < 20 && !drawn; i++) {
+    drawn = await page.call(() => { const c = document.querySelector('.viewer-canvas'); const d = c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data; return !!c.width && d[3] === 255 && !document.querySelector('.viewer-canvas-gl'); });
+    if (!drawn) await new Promise((r) => setTimeout(r, 100));
+  }
+  ok(drawn, 'the preview draws with the classic compositor alone');
 
   // the exact frame on pause
   const exact = () => page.call(() => { const i = document.querySelector('.viewer-exact'); return { on: i.classList.contains('is-on'), w: i.naturalWidth, h: i.naturalHeight, src: i.getAttribute('src')?.length || 0 }; });

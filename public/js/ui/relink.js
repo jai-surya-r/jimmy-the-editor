@@ -4,7 +4,8 @@
 import { useState } from 'preact/hooks';
 import { html, Modal, Button } from './common.js';
 import { get, post } from '../core/api.js';
-import { notify, openDialog, dialogCaller } from '../core/notify.js';
+import { notify, openDialog, dialogCaller, overlays } from '../core/notify.js';
+import { app } from '../core/app.js';
 import { pickPath } from './dialogs.js';
 
 export function RelinkDialog({ tab, list: initial, close }) {
@@ -42,9 +43,15 @@ export function RelinkDialog({ tab, list: initial, close }) {
   </${Modal}>`;
 }
 
-// When a project opens: offer to locate its missing footage (once per open tab).
+// When a project opens: offer to locate its missing footage (once per open tab). Only one dialog shows at a time,
+// so it waits for one that is already open (the welcome tour, Settings…) instead of pushing it aside.
 export async function checkMissing(tab) {
   let r;
   try { r = await get(`/api/p/${tab.projectId}/missing`); } catch { return; }
-  if (r?.missing?.length) openDialog(RelinkDialog, { tab, list: r.missing });
+  if (!r?.missing?.length) return;
+  for (let i = 0; overlays.get().dialog; i++) {
+    if (i > 1200 || !app.get().tabs.includes(tab.id)) return; // 10 minutes, or the project was closed
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  openDialog(RelinkDialog, { tab, list: r.missing });
 }
