@@ -17,3 +17,6 @@ tests/golden/text-report.html
 /CLAUDE.md
 /docs/PROGRESS.md
 /*.pdf
+# Claude Code: the shared /mac-check command is committed; personal settings and worktrees are not
+/.claude/settings.local.json
+/.claude/worktrees/

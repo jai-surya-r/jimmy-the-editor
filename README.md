@@ -93,8 +93,13 @@ Export formats: H.264 MP4, ProRes 422 HQ, and ProRes 4444 with alpha (transparen
 ## Troubleshooting
 
 - **"project.json can't be read"**: the file has a JSON syntax error, usually from a half-finished edit. Editing pauses so nothing gets overwritten. Click *Ask Claude to fix* or *Restore last good version*.
-- **Media offline**: the file moved or was renamed. Update its `path` in `project.json` (or ask Claude to), then use *Re-scan media files* in the bin's ⋯ menu.
+- **Media offline**: the file moved or was renamed, or the project was made on another computer (Windows and Mac paths differ). When a project opens with missing files, Jimmy asks you to locate one; the others in the same folders, or close by, are found with it. The bin's red *offline* badge opens the same window.
+- **A project shared between computers**: Claude's chats stay on the computer they were made on. On another computer, each sequence that had a chat gets a new one (a dashed chip in the Claude panel), which starts with its first message.
 - **Exports never start**: Chrome or Edge must be installed for headless rendering. Otherwise keep the editor open and it renders in the background of that page.
+
+## Testing on a real Mac (optional, for contributors)
+
+GitHub's Macs are virtual, so the workflow in `.github/workflows/mac.yml` can pass while a real Mac still has problems. On a Mac with the repo cloned, open [Claude Code](https://docs.anthropic.com/claude-code) in the folder and type `/mac-check`: Claude runs the test suite one test at a time, fixes what fails on that Mac on a branch of its own, and writes a report. Nothing is pushed until you say so. What it does, and the rules it follows, are in [`.claude/commands/mac-check.md`](.claude/commands/mac-check.md).
 
 ## Licence
 
