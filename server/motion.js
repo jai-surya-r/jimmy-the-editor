@@ -13,6 +13,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
 import { FFMPEG, perf, withThreads, lowerPriority } from './ffmpeg.js';
+import { tierLimits } from './tiers.js';
 import { budget } from './budget.js';
 import { perflog } from './perflog.js';
 import { sha1, toPosix, safeJoin, uniqueFileName, APP_DIR, exists } from './util.js';
@@ -762,7 +763,8 @@ export class MotionService {
     // Several pages render one-second blocks (each takes the next block free); frames are written to ffmpeg in
     // order. How many pages work at once follows the budget: under pressure the extra pages stop and close
     // (freeing their memory), and open again once the machine is calm. One page always keeps going (unless paused).
-    const pageCount = clamp(Math.round(perf().threads / 3), 1, Math.min(MAX_BROWSERS, Math.ceil(frames / Math.max(1, Math.round(fps)))));
+    // (at most the power tier's pages: each is a browser drawing frames, server/tiers.js)
+    const pageCount = clamp(Math.round(perf().threads / 3), 1, Math.min(MAX_BROWSERS, tierLimits().motionPages, Math.ceil(frames / Math.max(1, Math.round(fps)))));
     const block = Math.max(1, Math.round(fps));
     const blocks = Math.ceil(frames / block);
     const url = `http://127.0.0.1:${this.port}${this.pageUrl(handle, job.handle.relativize(d.file), { mode: 'render', params: d.params, ...d.spec, edit: d.edit })}`;

@@ -129,6 +129,8 @@ socket.on((msg) => {
     const was = app.get().server?.gpu?.failed;
     app.set((s) => ({ ...s, server: { ...s.server, gpu: msg.gpu } }));
     if (msg.gpu.failed && !was) notify(`The ${msg.gpu.failed.device} GPU failed during an export, so exports use the CPU until Jimmy restarts.`, 'error', { timeout: 10000 });
+  } else if (msg.type === 'machine') {
+    app.set((s) => ({ ...s, server: { ...s.server, machine: msg.machine } })); // the power tier (Settings, Viewer)
   } else if (msg.type === 'motion-stack') {
     app.set({ motionStack: msg.stack });
   } else if (msg.type === 'proxy-queue') {

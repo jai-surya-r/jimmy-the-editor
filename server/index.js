@@ -19,7 +19,7 @@ import { PrerenderManager } from './prerender.js';
 import { listSnapshots, takeSnapshot, restoreSnapshot } from './snapshots.js';
 import { getTranscript, saveTranscript } from './transcripts.js';
 import { audioLag } from './audiosync.js';
-import { agentStatus, installAgent, installJob, startCodexLogin, codexLoginState, afterEffectsApp } from './agents.js';
+import { agentStatus, installAgent, installJob, makeGlobal, startCodexLogin, codexLoginState, afterEffectsApp } from './agents.js';
 import { aeCall, aeLive } from './aehost.js';
 import { missingMedia, relinkMedia } from './relink.js';
 import { listAccounts, addProfile, removeProfile, startLogin, getLogin, sendLoginCode, cancelLogin, cancelAllLogins, signOut } from './accounts.js';
@@ -37,6 +37,7 @@ import {
 } from './util.js';
 import { budget } from './budget.js';
 import { detectGpu, gpuInfo, onGpuChange, cleanGpuSettings } from './gpu.js';
+import { testMachine, onMachineChange, machineTesting, currentTier, TIERS, TIER_SETTINGS, TIER_LIMITS } from './machine.js';
 import { perflog } from './perflog.js';
 import { uid, guessMediaType, sequenceDuration, VIDEO_EXT, AUDIO_EXT, IMAGE_EXT } from '../public/js/core/model.js';
 
@@ -147,6 +148,9 @@ budget.claudeWorking = () => chats.working();
 // graphics hardware for exports: detected in the background (cached until ffmpeg or the hardware changes)
 onGpuChange((info) => { emitAll({ type: 'gpu', gpu: info }); prerender.scheduleAll(); });
 setTimeout(() => detectGpu().catch(() => {}), 3000);
+// how strong this computer is (server/machine.js): measured once, a little after the GPU check, again when it changes
+onMachineChange(() => { emitAll({ type: 'machine', machine: machineState() }); media.queue.pump(); });
+setTimeout(() => testMachine().catch(() => {}), 9000);
 let onBattery = false;
 budget.onChange((info) => {
   updatePrerenderPause();
@@ -344,7 +348,19 @@ route('GET', '/api/state', async () => ({
   exportPresets: getConfig().exportPresets || {},
   scheduler: getConfig().scheduler === 'classic' ? 'classic' : 'smart',
   exactPause: getConfig().exactPause !== false,
+  machine: machineState(),
+  chatConnectors: getConfig().chatConnectors !== false,
 }));
+// the machine test and the power tier, for Settings and the viewer (server/machine.js, server/tiers.js)
+function machineState() {
+  const m = getConfig().machine || null;
+  return { measured: m, tier: currentTier(), profile: getConfig().performance?.profile || 'auto', testing: machineTesting(), settings: TIER_SETTINGS, limits: TIER_LIMITS };
+}
+route('POST', '/api/machine/test', async () => {
+  testMachine({ force: true }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 50));
+  return machineState();
+});
 route('POST', '/api/settings', async (req) => {
   const body = await readJsonBody(req);
   const patch = {};
@@ -357,6 +373,8 @@ route('POST', '/api/settings', async (req) => {
       threads: 'auto',
       priority: ['normal', 'low', 'idle'].includes(p.priority) ? p.priority : 'low',
       jobs: Math.max(1, Math.min(8, Number(p.jobs) || 2)),
+      // the power profile: auto (the measured tier) or one picked by hand; the values above come with it (Settings)
+      profile: ['auto', ...TIERS].includes(p.profile) ? p.profile : (getConfig().performance?.profile || 'auto'),
     };
   }
   if (body.proxyMode) patch.proxy = { ...getConfig().proxy, mode: body.proxyMode };
@@ -375,6 +393,7 @@ route('POST', '/api/settings', async (req) => {
   if (body.gpu) patch.gpu = cleanGpuSettings(body.gpu);
   if (body.scheduler) patch.scheduler = body.scheduler === 'classic' ? 'classic' : 'smart';
   if ('exactPause' in body) patch.exactPause = !!body.exactPause;
+  if ('chatConnectors' in body) patch.chatConnectors = !!body.chatConnectors; // new chats only (chats.js)
   // keyboard shortcut layouts (public/js/ui/keymap.js checks what's in them; here only the shape and size)
   if (body.keymap && typeof body.keymap === 'object') {
     const presets = {};
@@ -1146,6 +1165,12 @@ route('GET', '/api/p/:id/chat', async (_req, { id }) => {
 // the coding agents: installed? signed in? (first start); install / Codex sign-in on the user's click
 route('GET', '/api/agents', async () => ({ agents: agentStatus(), accounts: process.env.JIMMY_FAKE_AGENTS === 'none' ? [] : await listAccounts({ fresh: true }) }));
 route('POST', '/api/agents/install', async (req) => ({ job: installAgent(String((await readJsonBody(req)).agent || '')) }));
+// put an installed agent's folder on the user's PATH, so it works in every terminal (agents.js addToUserPath)
+route('POST', '/api/agents/global', async (req) => {
+  const r = makeGlobal(String((await readJsonBody(req)).agent || ''));
+  if (!r.ok) throw httpError(500, `Couldn't add it to PATH: ${r.error}`);
+  return r;
+});
 route('GET', '/api/agents/install/:agent', async (_req, { agent }) => ({ job: installJob(agent) }));
 route('POST', '/api/agents/codex/login', async () => startCodexLogin());
 route('GET', '/api/agents/codex/login', async () => ({ login: codexLoginState() }));

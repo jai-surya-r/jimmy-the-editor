@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { getConfig } from './config.js';
+import { tierLimits } from './tiers.js';
 
 function findBinary(name) {
   const exe = process.platform === 'win32' ? `${name}.exe` : name;
@@ -93,7 +94,8 @@ export function perf() {
 export function renderSlots() {
   const { threads } = perf();
   const byMemory = Math.max(1, Math.floor(os.totalmem() / (3 * 1024 ** 3)));
-  const slots = Math.max(1, Math.min(8, Math.floor(threads / 4), byMemory));
+  // (the power tier caps it: a small laptop renders one chunk at a time, server/tiers.js)
+  const slots = Math.max(1, Math.min(tierLimits().renderSlots, Math.floor(threads / 4), byMemory));
   return { slots, threads: Math.max(1, Math.floor(threads / slots)) };
 }
 // Threads for one job when several run side by side.

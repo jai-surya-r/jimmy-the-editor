@@ -1629,9 +1629,13 @@ mark.hl { background: rgba(245, 196, 81, 0.38); color: inherit; border-radius: 3
 .activity-ring circle { fill: none; stroke-width: 2; }
 .activity-track { stroke: transparent; }
 .activity-btn.is-busy .activity-track { stroke: var(--line-2); }
-.activity-fill { stroke: var(--accent-2); stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
+/* (no transition: a progress update every few hundred ms would keep the main thread painting the ring) */
+.activity-fill { stroke: var(--accent-2); stroke-linecap: round; }
 .activity-badge { position: absolute; top: -1px; right: -3px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; box-sizing: border-box;
   font-size: 9px; font-weight: 600; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; background: var(--accent); color: var(--on-accent); pointer-events: none; }
 .jobs-section { display: flex; flex-direction: column; gap: 4px; }
 .jobs-section + .jobs-section { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .jobs-section-head { display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 8px; font-size: 12px; }
+.cc-mcp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 4px 0; font-size: 11px; color: var(--text-3, var(--text-2)); min-width: 0; }
+.cc-mcp > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-mcp-off { color: var(--warn, #e3b341); }

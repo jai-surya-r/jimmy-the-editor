@@ -242,8 +242,17 @@ const TOOL_META = {
   Skill: ['wand', (i) => `Skill: ${i.skill}`],
   ApplyPatch: ['edit', (i) => `Edit ${(i.files || []).map((x) => base(x.split(' ').slice(1).join(' '))).join(', ')}`], // Codex
 };
-const toolIcon = (name) => TOOL_META[name]?.[0] || 'wand';
-const toolTitle = (name, input) => { try { return TOOL_META[name]?.[1](input || {}) || name; } catch { return name; } };
+// an MCP server's tool (mcp__<server>__<tool>): "Higgsfield: generate image"
+const mcpName = (name) => {
+  const m = /^mcp__(.+?)__(.+)$/.exec(name || '');
+  return m ? { server: m[1].replace(/^claude_ai_/, '').replace(/_/g, ' '), tool: m[2].replace(/_/g, ' ') } : null;
+};
+const toolIcon = (name) => TOOL_META[name]?.[0] || (mcpName(name) ? 'layers' : 'wand');
+const toolTitle = (name, input) => {
+  const m = mcpName(name);
+  if (m) return `${m.server}: ${m.tool}`;
+  try { return TOOL_META[name]?.[1](input || {}) || name; } catch { return name; }
+};
 
 function resultText(r) {
   if (!r) return '';
@@ -348,6 +357,22 @@ function BackgroundTask({ task, onStop }) {
 
 // the account's usage windows (from Claude Code's rate-limit reports)
 const WINDOW_LABELS = { five_hour: 'Session', seven_day: 'Week', seven_day_opus: 'Week (Opus)', seven_day_sonnet: 'Week (Sonnet)' };
+// The MCP servers this chat has (the same as `claude` in a terminal): connected ones by name, and the ones that
+// failed or need signing in (that happens in a terminal: `claude`, then /mcp).
+function McpLine({ mcp }) {
+  if (!mcp?.length) return null;
+  const on = mcp.filter((x) => x.status === 'connected');
+  const wait = mcp.filter((x) => x.status === 'pending');
+  const off = mcp.filter((x) => x.status !== 'connected' && x.status !== 'pending' && x.status !== 'disabled');
+  const nm = (x) => x.name.replace(/^claude\.ai /, '');
+  const tip = mcp.map((x) => `${nm(x)}: ${x.status}${x.tools != null ? ` (${x.tools} tools)` : ''}`).join('\n')
+    + (off.length ? '\n\nTo fix one: open a terminal tab, run claude, then /mcp.' : '');
+  return html`<div class="cc-mcp" title=${tip}><${Icon} name="layers" size=${11} />
+    <span>MCP: ${on.map(nm).join(' · ') || 'none connected'}${wait.length ? ` · ${wait.length} connecting…` : ''}</span>
+    ${off.length ? html`<span class="cc-mcp-off">${off.map((x) => `${nm(x)} ${x.status === 'needs-auth' ? 'needs sign-in' : x.status}`).join(' · ')}</span>` : null}
+  </div>`;
+}
+
 export function Limits({ limits }) {
   const w = limits?.unifiedWindows;
   if (!w) return null;
@@ -500,7 +525,7 @@ function PermissionCard({ req, answer, onAnswer }) {
 }
 
 const verb = (tool) => ({ Write: 'create this file', Edit: 'edit this file', MultiEdit: 'edit this file', NotebookEdit: 'edit this notebook',
-  Bash: 'run this command', PowerShell: 'run this command', WebFetch: 'fetch this page', WebSearch: 'search the web' }[tool] || `use ${tool}`);
+  Bash: 'run this command', PowerShell: 'run this command', WebFetch: 'fetch this page', WebSearch: 'search the web' }[tool] || (mcpName(tool) ? `use ${mcpName(tool).server}` : `use ${tool}`));
 
 // ------------------------------------------------------------------ messages
 
@@ -878,6 +903,7 @@ Output: ${u.output.toLocaleString()} (Claude's writing and thinking)`;
       </div>
       <${Context} info=${info} busy=${busy} running=${running} onNew=${onNew} onCompact=${() => { stick.current = true; wsSend(s, { t: 'send', text: '/compact' }); }} />
       <${Limits} limits=${info.limits} />
+      <${McpLine} mcp=${info.mcp} />
       <div class="cc-hint">${st.connected ? html`Enter to send · Shift+Enter for a new line${busy ? ' · Esc to stop' : ''}` : 'Reconnecting…'}</div>
     </div>
     ${drag ? html`<div class="cc-drop"><${Icon} name="upload" size=${22} />Drop images or files to attach</div>` : null}

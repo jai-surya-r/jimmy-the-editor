@@ -479,7 +479,22 @@ export function SettingsDialog({ close, init }) {
   const setG = (k) => (v) => setGpu({ ...gpu, [k]: v });
   const [scheduler, setScheduler] = useState(init?.scheduler ?? (server?.scheduler || 'smart'));
   const [exactPause, setExactPause] = useState(init?.exactPause ?? (server?.exactPause !== false));
-  const draft = { theme, profile, proxy, perf, pre, cacheDir, gpu, scheduler, exactPause };
+  const [connectors, setConnectors] = useState(init?.connectors ?? (server?.chatConnectors !== false));
+  const draft = { theme, profile, proxy, perf, pre, cacheDir, gpu, scheduler, exactPause, connectors };
+  // the power profile (server/machine.js measures the computer; server/tiers.js says what each tier sets): picking one
+  // fills in its values below, which can still be changed one by one
+  const machine = useStore(app, (s) => s.server?.machine);
+  const measured = machine?.measured;
+  const TIER_NAME = { light: 'Light', balanced: 'Balanced', full: 'Full' };
+  const pickProfile = (v) => {
+    const tier = v === 'auto' ? measured?.tier || 'full' : v;
+    const t = machine?.settings?.[tier];
+    setPerf({ ...perf, ...(t?.performance || {}), profile: v });
+    if (t?.prerender) setPre({ ...pre, ...t.prerender });
+  };
+  const testAgain = async () => {
+    try { const m = await post('/api/machine/test'); app.set((x) => ({ ...x, server: { ...x.server, machine: m } })); } catch (e) { notify(e.message, 'error'); }
+  };
   // leaving without Save puts the saved theme back, unless the dialog only steps aside and comes back
   const kept = useRef(false);
   useEffect(() => () => { if (!kept.current && currentTheme() !== savedTheme()) applyTheme(savedTheme(), { save: false }); }, []);
@@ -505,7 +520,7 @@ export function SettingsDialog({ close, init }) {
   };
   const save = async () => {
     const cacheChanged = (cacheDir || '') !== (server?.cacheDir || '');
-    await post('/api/settings', { claudeConfigDir: profile || null, proxyMode: proxy, performance: perf, prerender: pre, ...(gpuInfo ? { gpu } : {}), scheduler, exactPause, ...(cacheChanged ? { cacheDir: cacheDir || null } : {}) });
+    await post('/api/settings', { claudeConfigDir: profile || null, proxyMode: proxy, performance: perf, prerender: pre, ...(gpuInfo ? { gpu } : {}), scheduler, exactPause, chatConnectors: connectors, ...(cacheChanged ? { cacheDir: cacheDir || null } : {}) });
     applyTheme(theme);
     kept.current = true;
     app.set({ server: await get('/api/state') });
@@ -533,7 +548,18 @@ export function SettingsDialog({ close, init }) {
           <${Select} value=${profile} onChange=${setProfile} options=${[{ value: '', label: 'Inherit from the server environment' }, ...(server?.claudeProfiles || []).map((p) => ({ value: p.dir, label: `${p.name} — ${p.dir}` }))]} />
           <${Button} icon="sparkle" title="See who is signed in, sign in or out, add an account" onClick=${() => { const back = stepAside(); close(null); openAccounts({ onBack: back }); }}>Accounts…</${Button}>
         </div>
+        <${Toggle} checked=${connectors} onChange=${setConnectors} label="The chat uses my claude.ai connectors too (Drive, Docs and the like), as Claude in a terminal does. MCP servers set up in Claude Code itself are always there. New chats only." />
       </div>
+      ${server?.platform === 'win32' ? html`<div class="field"><span>Power profile</span>
+        <${Segmented} value=${perf.profile || 'auto'} onChange=${pickProfile} options=${[
+          { value: 'auto', label: `Auto${measured?.tier ? ` (${TIER_NAME[measured.tier]})` : ''}` },
+          { value: 'light', label: 'Light' }, { value: 'balanced', label: 'Balanced' }, { value: 'full', label: 'Full' }]} />
+        <div class="field-row" style=${{ gap: '8px', alignItems: 'center' }}>
+          <${Button} icon="gauge" disabled=${machine?.testing} onClick=${testAgain}>${machine?.testing ? 'Testing…' : 'Test this computer again'}</${Button}>
+          <span class="muted">${machine?.testing ? 'A few seconds…' : measured ? `${measured.cores} threads, ${Math.round(measured.ramGB)} GB, 1080p decode ${measured.decodeFps1} fps per core` : 'Not tested yet (it runs by itself shortly after Jimmy starts)'}</span>
+        </div>
+      </div>
+      <div class="dialog-hint">Jimmy tests this computer once (a few seconds, in the background) and picks how hard to work it. Light, for small laptops: one thing at a time, background work at idle priority, no background pre-rendering, proxies for video above 1080p or faster than 30 fps, and the preview at half size. Balanced: proxies above 1080p and fewer renders side by side. Full: everything as fast as the machine allows. Picking one sets the options below; you can still change them one by one. On any profile, the preview drops to half size by itself while playback can't keep up.</div>` : null}
       <label class="field"><span>Preview proxies</span>
         <${Segmented} value=${proxy} onChange=${setProxy} options=${[{ value: 'auto', label: 'Auto' }, { value: 'always', label: 'Always' }, { value: 'never', label: 'Only when needed' }]} />
       </label>

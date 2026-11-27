@@ -42,14 +42,18 @@ export class DecodeStream {
     const ss = Math.max(0, this.srcStart + (startIndex * this.speed) / this.fps);
     const timing = `setpts=(PTS-STARTPTS)/${this.speed},fps=${fpsRational(this.fps)}`;
     // NVIDIA: decode and scale on the GPU, bringing back full-resolution colour (more accurate than scaling
-    // 4:2:0 on the CPU); other GPUs decode there and the CPU scales.
+    // 4:2:0 on the CPU). Intel: its decoder keeps frames on the GPU (the CPU scaler can't take them, so every
+    // export from heavy footage failed there and fell back to the CPU): scaled on the GPU, then brought back.
+    // Others decode there and the CPU scales.
     const hw = this.hw;
     // cropped after scaling, so the pixels sent are exactly those of the whole picture
     const cut = this.crop ? `,crop=${this.crop[2]}:${this.crop[3]}:${this.crop[0]}:${this.crop[1]}` : '';
     const vf = hw?.cuda
       ? `${timing},scale_cuda=${this.w}:${this.h}:interp_algo=bicubic:format=yuv444p,hwdownload,format=yuv444p${cut},format=rgba`
-      : `${timing},scale=${this.w}:${this.h}:flags=bicubic,format=rgba${cut}`;
-    const pre = hw ? ['-hwaccel', hw.hwaccel, ...(hw.cuda ? ['-hwaccel_output_format', 'cuda'] : [])] : [];
+      : hw?.qsv
+        ? `${timing},scale_qsv=w=${this.w}:h=${this.h}:format=nv12,hwdownload,format=nv12${cut},format=rgba`
+        : `${timing},scale=${this.w}:${this.h}:flags=bicubic,format=rgba${cut}`;
+    const pre = hw ? ['-hwaccel', hw.hwaccel, ...(hw.cuda ? ['-hwaccel_output_format', 'cuda'] : hw.qsv ? ['-hwaccel_output_format', 'qsv'] : [])] : [];
     const n = String(this.threads);
     const p = spawn(this.ffmpeg, ['-threads', n, '-filter_threads', n, '-v', 'error', ...pre, '-ss', ss.toFixed(6), '-i', this.file,
       '-an', '-sn', '-dn', '-vf', vf, '-f', 'rawvideo', '-threads', n, 'pipe:1'], { windowsHide: true });

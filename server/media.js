@@ -8,6 +8,8 @@ import { budget } from './budget.js';
 import { FFMPEG, probe, run, progressParser, hasAlpha, perf, withThreads, lowerPriority, cpuH264 } from './ffmpeg.js';
 import { sha1, readJson, writeFileAtomic, exists as there } from './util.js';
 import { getConfig } from './config.js';
+import { tierLimits } from './tiers.js';
+import { engineFor, encoderArgs, decodePlan } from './gpu.js';
 import { moveFile } from './layout.js';
 import { perflog } from './perflog.js';
 
@@ -179,10 +181,13 @@ export class MediaService {
       const needs = needsMetaPatch(item, meta);
       if (needs) patches[item.id] = metaFields(meta);
       const proxyMode = getConfig().proxy?.mode || 'auto';
-      // Unplayable formats always need a proxy; "auto" also proxies very large video for smooth scrubbing.
+      // Unplayable formats always need a proxy; "auto" also proxies video too big (or, on a light computer, too fast)
+      // for this computer to play smoothly: above 2560x1600 on a strong one, above 1920x1200 on others (server/tiers.js)
+      const lim = tierLimits();
+      const area = meta.width * meta.height;
       const wantProxy = !meta.browserOk
         || (proxyMode === 'always' && meta.type === 'video')
-        || (proxyMode === 'auto' && meta.type === 'video' && meta.width * meta.height > 2560 * 1600);
+        || (proxyMode === 'auto' && meta.type === 'video' && (area > lim.proxyAbove || (lim.proxyFps && area > lim.proxyFps.above && meta.fps > lim.proxyFps.fps)));
       const proxyExt = proxyExtFor(meta);
       const proxyPath = await this.findProxy(handle, abs, key, proxyExt, st.mtimeMs);
       const proxyReady = !!proxyPath;
@@ -388,6 +393,7 @@ export class MediaService {
     const tmp = out === cached ? this.cacheFile(handle, key, `proxy.tmp.${ext}`) : out.replace(/(\.\w+)$/, '.tmp$1');
     this.set(handle.id, mediaId, { proxy: 'running', proxyProgress: 0 });
     let args;
+    let gpuArgs = null;
     if (meta.type === 'video' && ext === 'webm') {
       // transparent source: VP9 keeps the alpha channel (an H.264 proxy would turn it black)
       const gop = Math.max(1, Math.round((meta.fps || 30) / 3));
@@ -399,10 +405,32 @@ export class MediaService {
     } else if (meta.type === 'video') {
       // short GOP (~1/3 s) so scrubbing a proxy seeks almost instantly
       const gop = Math.max(1, Math.round((meta.fps || 30) / 3));
-      args = ['-v', 'error', '-y', '-i', abs, '-map', '0:v:0', '-map', '0:a:0?', '-sn',
-        '-vf', "scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
-        ...cpuH264(22, 'veryfast', 1280, 720), '-g', String(gop), '-keyint_min', String(gop),
-        '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-movflags', '+faststart', '-progress', 'pipe:2', '-nostats', tmp];
+      // Windows, with a graphics card turned on for exports (Settings › Hardware acceleration): proxies use it too,
+      // several times faster on 4K and HEVC footage and with a fraction of the CPU, which leaves a laptop free for
+      // editing. Heavy footage (decodePlan: 4K-class H.264, HEVC, AV1) decodes on the card. Intel: decoded, scaled
+      // and encoded on the GPU (its decoder keeps frames there; the CPU scaler can't take them). NVIDIA and AMD:
+      // decoded on the card, frames back in memory for the usual scaling, encoded on the card (NVIDIA's own GPU scaler
+      // failed on some HEVC and was slower). If the GPU fails on a file, the proxy is made again on the CPU.
+      const spec = process.platform === 'win32' ? { ...engineFor('standard', 'h264', { width: 1280, height: 720 }), quality: 'standard' } : { enc: null, dec: null };
+      const enc = spec.enc ? encoderArgs(spec) : null;
+      // (rotated phone footage: ffmpeg turns it upright on the CPU, which GPU frames can't go through)
+      const hw = meta.rotation ? null : decodePlan(spec, { ...meta, hasAlpha: !!meta.alpha });
+      const fit = Math.min(1, 1280 / Math.max(meta.width || 1280, meta.height || 720));
+      const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+      const [pw, ph] = [even((meta.width || 1280) * fit), even((meta.height || 720) * fit)];
+      const onIntel = hw?.hwaccel === 'qsv' && enc && spec.enc === 'intel';
+      const make = (gpu) => {
+        const dec = !gpu || !hw ? [] : onIntel ? ['-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv'] : ['-hwaccel', hw.hwaccel === 'qsv' ? 'd3d11va' : hw.hwaccel];
+        const vf = gpu && onIntel ? `scale_qsv=w=${pw}:h=${ph}:format=nv12`
+          : `scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=${gpu && enc ? enc.pix : 'yuv420p'}`;
+        return ['-v', 'error', '-y', ...dec, '-i', abs, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-vf', vf,
+          ...(gpu && enc ? enc.args : cpuH264(22, 'veryfast', 1280, 720)), '-g', String(gop), '-keyint_min', String(gop),
+          '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-movflags', '+faststart', '-progress', 'pipe:2', '-nostats', tmp];
+      };
+      args = make(false);
+      if (enc || hw) { gpuArgs = make(true); }
+      // tests: a GPU attempt that fails, to check the CPU takes over
+      if (gpuArgs && process.env.JIMMY_FAKE_GPU_PROXY_FAIL) gpuArgs.splice(gpuArgs.length - 1, 0, '-no_such_option', '1');
     } else if (meta.type === 'audio') {
       args = ['-v', 'error', '-y', '-i', abs, '-vn', '-c:a', 'aac', '-b:a', '192k', '-progress', 'pipe:2', '-nostats', tmp];
     } else {
@@ -414,7 +442,15 @@ export class MediaService {
     });
     const signal = this.signal(handle.id);
     try {
-      await run(FFMPEG, args, { onStderr: onProg, signal });
+      if (gpuArgs) {
+        try { await run(FFMPEG, gpuArgs, { onStderr: onProg, signal }); } catch (err) {
+          if (signal.aborted) throw err;
+          console.warn(`[media] proxy on the GPU failed (${String(err.message).split('\n')[0].slice(0, 160)}): making it on the CPU`);
+          await fsp.unlink(tmp).catch(() => {});
+          last = 0;
+          await run(FFMPEG, args, { onStderr: onProg, signal });
+        }
+      } else await run(FFMPEG, args, { onStderr: onProg, signal });
       await fsp.rename(tmp, out);
       fsp.stat(out).then((s) => perflog.io('proxyW', s.size), () => {});
       this.set(handle.id, mediaId, { proxy: 'ready', proxyProgress: 1, proxyPath: out });

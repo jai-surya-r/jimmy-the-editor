@@ -166,7 +166,7 @@ export function decodePlan(spec, media) {
   if (codec === 'h264' && media.pixFmt && !/^(yuvj?420p|nv12)$/.test(media.pixFmt)) return null;
   const v = vendor(spec.dec);
   if (!v) return null;
-  return { hwaccel: v.decode, cuda: v.decode === 'cuda' };
+  return { hwaccel: v.decode, cuda: v.decode === 'cuda', qsv: v.decode === 'qsv' };
 }
 
 // A GPU export step failed: use the CPU for the rest of this session (the editor is told).

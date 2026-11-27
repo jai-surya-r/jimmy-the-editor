@@ -22,6 +22,13 @@ export function Viewer({ tab, readOnly = false, children = null }) {
   const seqId = useStore(tab.ui, (s) => s.sequenceId);
   const zoomMode = useStore(tab.ui, (s) => s.viewerZoom);
   const quality = useStore(tab.ui, (s) => s.quality);
+  // Auto: full size, or what the power tier says (half on a light computer), or half once playback couldn't keep up
+  // (playback.js stutter sets autoHalf; picking a size in the menu clears it)
+  const tierCap = useStore(app, (s) => { const m = s.server?.machine; return m?.limits?.[m.tier]?.previewCap ?? 1; });
+  const autoHalf = useStore(tab.ui, (s) => !!s.autoHalf);
+  // (Windows only for now: on a Mac the preview works as it did)
+  const onWindows = useStore(app, (s) => s.server?.platform === 'win32');
+  const autoCap = onWindows ? Math.min(tierCap, autoHalf ? 0.5 : 1) : 1;
   const safe = useStore(tab.ui, (s) => s.safeArea);
   const rulers = useStore(tab.ui, (s) => s.rulers);
   const wrapRef = useRef(null);
@@ -89,7 +96,7 @@ export function Viewer({ tab, readOnly = false, children = null }) {
   const zMax = Math.max(fit, Math.min(8, 8192 / (sw * dpr), 8192 / (sh * dpr)));
   const z = view ? view.z : zoomMode === 'fit' ? fit : Number(zoomMode);
   const cssW = Math.max(1, Math.round(sw * z)), cssH = Math.max(1, Math.round(sh * z));
-  const cap = QUALITY[quality] || 1;
+  const cap = quality === 'auto' || !QUALITY[quality] ? autoCap : QUALITY[quality];
   const pxW = Math.max(1, Math.round(Math.min(cssW * dpr, sw * cap)));
   const pxH = Math.max(1, Math.round(pxW * (sh / sw)));
   live.current = { ...live.current, readOnly, z, cssW, cssH, pxW, pxH, dpr, safe, zMax, fit, sw, sh, view };
@@ -390,8 +397,8 @@ export function Viewer({ tab, readOnly = false, children = null }) {
       <${IconButton} icon="safe" title="Safe margins" active=${safe} onClick=${() => tab.ui.set({ safeArea: !safe })} />
       <${Select} class="select-sm" value=${zoomMode} title="Zoom" onChange=${(v) => tab.ui.set({ viewerZoom: v })}
         options=${[{ value: 'fit', label: 'Fit' }, { value: '0.25', label: '25%' }, { value: '0.5', label: '50%' }, { value: '1', label: '100%' }]} />
-      <${Select} class="select-sm" value=${quality} title="Preview resolution" onChange=${(v) => tab.ui.set({ quality: v })}
-        options=${[{ value: 'auto', label: 'Auto' }, { value: 'half', label: '1/2' }, { value: 'quarter', label: '1/4' }]} />
+      <${Select} class="select-sm" value=${quality} title=${quality === 'auto' && autoCap < 1 ? `Preview resolution: Auto is at half size ${autoHalf ? 'because playback could not keep up' : 'on this computer (Settings › Power profile)'}` : 'Preview resolution'} onChange=${(v) => tab.ui.set({ quality: v, autoHalf: false })}
+        options=${[{ value: 'auto', label: quality === 'auto' && autoCap < 1 ? 'Auto · 1/2' : 'Auto' }, { value: 'half', label: '1/2' }, { value: 'quarter', label: '1/4' }]} />
     </header>`}
     <div class="viewer-stage ${view ? 'is-zoomed' : zoomMode !== 'fit' ? 'is-scroll' : ''}" ref=${wrapRef} onDblClick=${(e) => { if (e.target === wrapRef.current) setView(null); }}>
       ${view ? html`<button class="viewer-zoom-badge" title="Back to Fit (or double-click the background)" onClick=${() => setView(null)}>${Math.round(z * 100)}% · Fit</button>` : null}

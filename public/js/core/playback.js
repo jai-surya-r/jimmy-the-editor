@@ -377,6 +377,12 @@ export class PlaybackEngine {
       this.lagSent = now;
       this.late = [];
       socket.send({ type: 'activity', lag: true });
+      // lagging again within 10 s (not just a hiccup while clips load): the preview on Auto drops to half size for
+      // the rest of this session (Viewer.js), so drawing each frame costs less
+      const ui = this.tab?.ui;
+      const again = now - (this.lagBefore || -1e9) < 10000;
+      this.lagBefore = now;
+      if (again && ui && (ui.get().quality || 'auto') === 'auto' && !ui.get().autoHalf) ui.set({ autoHalf: true });
     }
   }
 

@@ -55,20 +55,78 @@ function run(cmd, args, timeoutMs = 15000) {
   return { code: r.status, out: `${r.stdout || ''}${r.stderr || ''}`.trim() };
 }
 
-// { claude: { installed, path, version }, codex: { installed, path, version, loggedIn } }
+// ------------------------------------------------------------------ "global": on the PATH every terminal gets
+// Windows: Claude Code's official installer puts claude.exe in %USERPROFILE%\.local\bin but doesn't add that folder
+// to PATH, so `claude` works inside Jimmy (agentPath above) but not in the user's own terminals, and what they set up
+// there (`claude mcp add`, /mcp sign-ins) never happens. Jimmy adds the folder to the user's PATH (HKCU\Environment,
+// no admin rights needed, the value's %VARIABLES% kept as they are) after installing, or on the user's click.
+// JIMMY_PATH_KEY (tests): another registry key standing in for HKCU\Environment (then no machine PATH, no broadcast).
+// (the script goes in encoded: on a command line, Windows' quoting rules eat the backslashes of paths)
+const PS = (script) => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 20000, windowsHide: true });
+const norm = (d) => path.resolve(d).replace(/[\\/]+$/, '').toLowerCase();
+const KEY = () => (process.env.JIMMY_PATH_KEY || 'HKCU:\\Environment').replace(/'/g, "''");
+let savedCache = null;
+// the folders on the PATH saved for this user and for the machine (expanded), or null when it can't be read
+function savedPathDirs() {
+  if (!isWin) return null;
+  if (savedCache && Date.now() - savedCache.at < 30000) return savedCache.dirs;
+  const machine = process.env.JIMMY_PATH_KEY ? "''" : "[Environment]::GetEnvironmentVariable('Path', 'Machine')";
+  const r = PS(`$k = Get-Item -LiteralPath '${KEY()}' -ErrorAction SilentlyContinue; $u = if ($k) { $k.GetValue('Path', '', 'DoNotExpandEnvironmentNames') } else { '' }; $m = ${machine}; [Environment]::ExpandEnvironmentVariables("$u;$m")`);
+  const dirs = r.status === 0 ? new Set(r.stdout.trim().split(';').map((d) => d.trim()).filter(Boolean).map(norm)) : null;
+  savedCache = { at: Date.now(), dirs };
+  return dirs;
+}
+// true when `claude` (or codex) typed in a new terminal finds this command; null when unknown (not Windows)
+export function onSavedPath(cmdPath) {
+  const dirs = savedPathDirs();
+  return dirs ? dirs.has(norm(path.dirname(cmdPath))) : null;
+}
+// adds the folder holding this command to the user's saved PATH (and tells open programs, so new terminals see it)
+export function addToUserPath(cmdPath) {
+  if (!isWin) return { ok: true, changed: false };
+  const dir = path.dirname(cmdPath);
+  if (onSavedPath(cmdPath)) return { ok: true, changed: false };
+  const lit = dir.replace(/'/g, "''");
+  const r = PS([
+    `$key = '${KEY()}'`,
+    "if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force | Out-Null }",
+    "$cur = (Get-Item -LiteralPath $key).GetValue('Path', '', 'DoNotExpandEnvironmentNames')",
+    `$add = '${lit}'`,
+    "$parts = @($cur -split ';' | Where-Object { $_ -ne '' })",
+    "if (-not ($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\\') -ieq $add.TrimEnd('\\') })) {",
+    "  $new = (@($parts) + $add) -join ';'",
+    "  Set-ItemProperty -LiteralPath $key -Name Path -Value $new -Type ExpandString",
+    // setting (and clearing) a user variable through .NET tells every open program that the environment changed
+    process.env.JIMMY_PATH_KEY ? '' : "  [Environment]::SetEnvironmentVariable('JIMMY_PATH_REFRESH', '1', 'User'); [Environment]::SetEnvironmentVariable('JIMMY_PATH_REFRESH', $null, 'User')",
+    '}',
+  ].join('\n'));
+  savedCache = null;
+  if (r.status !== 0) return { ok: false, error: (r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' ') || `code ${r.status}` };
+  return { ok: !!onSavedPath(cmdPath), changed: true };
+}
+
+// { claude: { installed, path, version, global }, codex: { installed, path, version, loggedIn, global } }
+// global: false when the command works inside Jimmy only (Windows, its folder not on the saved PATH)
 export function agentStatus() {
   const out = {};
   for (const name of ['claude', 'codex']) {
     const p = process.env.JIMMY_FAKE_AGENTS === 'none' ? null : findCommand(name);
-    const info = { installed: !!p, path: p, version: null };
+    const info = { installed: !!p, path: p, version: null, global: null };
     if (p) {
       const v = run(p, ['--version']);
       info.version = /\d+\.\d+\.\d+[\w.-]*/.exec(v.out)?.[0] || null;
       if (name === 'codex') info.loggedIn = run(p, ['login', 'status']).code === 0;
+      info.global = onSavedPath(p);
     }
     out[name] = info;
   }
   return out;
+}
+export function makeGlobal(agent) {
+  if (agent !== 'claude' && agent !== 'codex') throw new Error('Unknown agent');
+  const p = findCommand(agent);
+  if (!p) throw new Error(`${agent === 'claude' ? 'Claude Code' : 'Codex'} is not installed yet.`);
+  return addToUserPath(p);
 }
 
 // ------------------------------------------------------------------ install (on the user's click)
@@ -110,6 +168,15 @@ export function installAgent(agent) {
     if (job.state !== 'running') return;
     const installed = process.env.JIMMY_FAKE_INSTALL ? code === 0 : !!findCommand(agent);
     job.state = code === 0 && installed ? 'done' : 'error';
+    // installed for every terminal, not just Jimmy (see addToUserPath)
+    // (test installs never touch the real PATH)
+    const found = job.state === 'done' && !(process.env.JIMMY_FAKE_INSTALL && !process.env.JIMMY_PATH_KEY) && findCommand(agent);
+    if (found) {
+      const g = addToUserPath(found);
+      job.global = g.ok;
+      if (g.changed && g.ok) job.log.push(`Added ${path.dirname(found)} to your PATH: "${agent}" now works in any new terminal.`);
+      if (!g.ok) job.log.push(`Installed, but ${path.dirname(found)} could not be added to your PATH (${g.error}).`);
+    }
     if (job.state === 'error') job.error = code === 0 ? `The installer finished, but the "${agent}" command wasn't found. Restart Jimmy and check again.` : `The installer stopped (code ${code}). The last lines are shown below.`;
   });
   return job;

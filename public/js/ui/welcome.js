@@ -58,6 +58,10 @@ export function SetupDialog({ close, then }) {
   const install = async (agent) => {
     try { const { job } = await post('/api/agents/install', { agent }); setJobs((x) => ({ ...x, [agent]: job })); } catch (e) { notify(e.message, 'error'); }
   };
+  // installed, but only Jimmy can find it (Windows: its folder isn't on PATH): put it there
+  const makeGlobal = async (agent) => {
+    try { await post('/api/agents/global', { agent }); notify(`${agent === 'claude' ? 'Claude Code' : 'Codex'} now works in any new terminal.`, 'success'); load(); } catch (e) { notify(e.message, 'error'); }
+  };
   const signInCodex = async () => {
     try { setCodexLogin(await post('/api/agents/codex/login')); } catch (e) { notify(e.message, 'error'); }
   };
@@ -69,13 +73,14 @@ export function SetupDialog({ close, then }) {
       <div class="setup-card-head"><span class="setup-logo">${logo}</span><b>${name}</b>
         <span class=${`setup-state ${signedIn ? 'is-ok' : info?.installed ? 'is-half' : ''}`}>${!st ? 'Checking…' : signedIn ? 'Ready' : info?.installed ? 'Installed · not signed in' : 'Not installed'}</span></div>
       <p class="setup-blurb">${blurb}</p>
-      ${info?.version ? html`<div class="setup-meta">Version ${info.version}${who ? ` · ${who}` : ''}</div>` : null}
+      ${info?.version ? html`<div class="setup-meta">Version ${info.version}${who ? ` · ${who}` : ''}${info.global === false ? ' · works inside Jimmy only' : ''}</div>` : null}
       ${job?.state === 'running' ? html`<div class="setup-job"><span class="spinner spinner-xs"></span>Installing… <span class="muted">${job.log.at(-1) || ''}</span></div>` : null}
       ${job?.state === 'error' ? html`<div class="setup-err">${job.error}${job.log?.length ? html`<pre>${job.log.slice(-4).join('\n')}</pre>` : null}</div>` : null}
-      ${job?.state === 'done' ? html`<div class="setup-ok"><${Icon} name="checkCircle" size=${13} /> Installed.</div>` : null}
+      ${job?.state === 'done' ? html`<div class="setup-ok"><${Icon} name="checkCircle" size=${13} /> Installed${job.global ? ', for every terminal too' : ''}.</div>` : null}
       <div class="setup-btns">
         ${st && !info?.installed ? html`<${Button} kind="primary" icon="download" disabled=${job?.state === 'running'} onClick=${() => install(agent)}>Install ${name}</${Button}>` : null}
         ${st && info?.installed && !signedIn ? html`<${Button} kind="primary" icon="external" onClick=${signIn}>Sign in</${Button}>` : null}
+        ${st && info?.installed && info.global === false ? html`<${Button} icon="terminal" title=${`Adds ${(info.path || '').replace(/[\\/][^\\/]+$/, '')} to your PATH, so "${agent}" also works in your own terminals (and what you set up there, like MCP servers, is shared with Jimmy)`} onClick=${() => makeGlobal(agent)}>Use in every terminal</${Button}>` : null}
       </div>
     </div>`;
   };

@@ -126,7 +126,7 @@ export class ChatManager {
     const models = agent === 'codex' ? this.codexModels() : null;
     if (!s) return { running: false, agent, models: models || this.models, limits: agent === 'codex' ? null : this.limitsFor(this.accountOf(projectId)) };
     if (agent === 'codex') return { running: s.running, agent, busy: s.busy, turnStart: s.busy ? s.turnStart : null, model: s.model, effort: s.effort, permissionMode: s.permissionMode, sessionId: s.sessionId, startedAt: s.startedAt, models };
-    return { running: s.running, agent, busy: s.busy, turnStart: s.busy ? s.turnStart : null, tasks: this.tasksInfo(s), shells: [...(s.shells?.keys() || [])], limits: this.limitsFor(s.configDir), model: s.model, effort: s.effort, permissionMode: s.permissionMode, sessionId: s.sessionId, startedAt: s.startedAt, models: s.models || this.models,
+    return { running: s.running, agent, busy: s.busy, turnStart: s.busy ? s.turnStart : null, mcp: s.mcp || null, tasks: this.tasksInfo(s), shells: [...(s.shells?.keys() || [])], limits: this.limitsFor(s.configDir), model: s.model, effort: s.effort, permissionMode: s.permissionMode, sessionId: s.sessionId, startedAt: s.startedAt, models: s.models || this.models,
       context: s.context, contextWindow: s.contextWindow, compacting: !!s.compacting, lastCallAt: s.lastCallAt, cacheTtl: s.cacheTtl };
   }
 
@@ -209,10 +209,10 @@ export class ChatManager {
     delete env.Path;
     for (const k of SESSION_VARS) delete env[k];
     applyConfigDir(env, configDir);
-    // The account's claude.ai connectors (Drive, Docs, image generators…) aren't used for editing, but their tools
-    // and instructions would be sent with every step of the chat. MCP servers set up in Claude Code itself
-    // (user or project settings) still load. "chatConnectors": true in data/config.json brings them back.
-    if (!getConfig().chatConnectors) env.ENABLE_CLAUDEAI_MCP_SERVERS = 'false';
+    // MCP: the chat gets the same tools as `claude` in a terminal: the servers set up in Claude Code (user and
+    // project settings) and the account's claude.ai connectors (Drive, Docs, image generators…). Settings ›
+    // "Claude chat uses my claude.ai connectors" off ("chatConnectors": false) leaves the connectors out.
+    if (getConfig().chatConnectors === false) env.ENABLE_CLAUDEAI_MCP_SERVERS = 'false';
 
     // claude may be an .exe or an npm .cmd shim on Windows; the shell finds either. Args are quoted for cmd.
     const q = (a) => (isWin ? (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a) : a);
@@ -259,7 +259,53 @@ export class ChatManager {
 
     s.initId = randomUUID();
     this.write(s, { type: 'control_request', request_id: s.initId, request: { subtype: 'initialize' } });
+    s.waits = new Map(); // control request id → its answer's resolver
+    s.mcp = null; // [{ name, status, tools }] once known
+    s.mcpReady = this.waitMcp(s);
     return s;
+  }
+
+  // a control request to the CLI and its answer (null when it doesn't answer in time)
+  ask(s, request, ms = 3000) {
+    return new Promise((resolve) => {
+      if (!s.running || !s.waits || !s.proc) { resolve(null); return; }
+      const id = randomUUID();
+      const t = setTimeout(() => { s.waits.delete(id); resolve(null); }, ms);
+      s.waits.set(id, (r) => { clearTimeout(t); resolve(r); });
+      this.write(s, { type: 'control_request', request_id: id, request });
+    });
+  }
+
+  // The MCP servers take a few seconds to connect after the CLI starts (claude.ai connectors ~1-3 s, local ones
+  // whatever they take); a message sent before that would not see their tools. The first message waits until none
+  // is still connecting (15 s at most); the chat panel lists them (info().mcp).
+  async waitMcp(s) {
+    const t0 = Date.now();
+    let last = null;
+    while (s.running && Date.now() - t0 < 15000) {
+      const r = await this.ask(s, { subtype: 'mcp_status' });
+      if (!r || r.subtype !== 'success') break; // a CLI that doesn't know the request: go on
+      s.mcp = (r.response?.mcpServers || []).map((x) => ({ name: x.name, status: x.status, tools: x.tools?.length ?? null }));
+      // the account's claude.ai connectors join the list only after the CLI has asked claude.ai for them (~0.5 s):
+      // done when nothing is connecting and the list stayed the same for two looks, a second or more after start
+      const now = JSON.stringify(s.mcp);
+      if (!s.mcp.some((x) => x.status === 'pending') && now === last && Date.now() - t0 > 1200) break;
+      last = now;
+      await new Promise((res) => setTimeout(res, 300));
+    }
+    if (s.running) this.status(s);
+    // the panel's list gets more looks: the claude.ai connectors can take several seconds to be listed (the CLI
+    // still gives their tools to the first message), and servers connect or drop later (refreshMcp after each reply)
+    for (const ms of [4000, 12000, 30000]) setTimeout(() => this.refreshMcp(s), ms);
+  }
+  async refreshMcp(s) {
+    if (!s.running || s.mcpAsking) return;
+    s.mcpAsking = true;
+    const r = await this.ask(s, { subtype: 'mcp_status' });
+    s.mcpAsking = false;
+    if (r?.subtype !== 'success') return;
+    const list = (r.response?.mcpServers || []).map((x) => ({ name: x.name, status: x.status, tools: x.tools?.length ?? null }));
+    if (JSON.stringify(list) !== JSON.stringify(s.mcp)) { s.mcp = list; this.status(s); }
   }
 
   // Codex: no long-running process; each message runs one `codex exec` turn on the same thread.
@@ -441,6 +487,8 @@ export class ChatManager {
     }
     if (m.type === 'control_response') {
       const r = m.response;
+      const wait = s.waits?.get(r?.request_id);
+      if (wait) { s.waits.delete(r.request_id); wait(r); return; }
       if (r?.request_id === s.initId && r.subtype === 'success' && Array.isArray(r.response?.models)) {
         s.models = r.response.models.map((x) => ({ value: x.value, resolvedModel: x.resolvedModel, displayName: x.displayName, description: x.description, efforts: x.supportsEffort ? x.supportedEffortLevels || [] : [] }));
         this.models = s.models;
@@ -513,6 +561,7 @@ export class ChatManager {
       const win = Math.max(0, ...Object.values(m.modelUsage || {}).map((u) => u?.contextWindow || 0));
       if (win) s.contextWindow = win;
       this.push(s, { type: 'result', subtype: m.subtype, isError: m.is_error, durationMs: m.duration_ms, usage: usageOf(m.usage), error: m.is_error ? m.result : null });
+      this.refreshMcp(s);
       this.status(s);
       if (!quiet || m.is_error) this.notice(s, m.is_error ? 'error' : 'done');
       s.quiet = false;
@@ -670,7 +719,9 @@ export class ChatManager {
     const message = { role: 'user', content };
     if (!s.busy) s.turnStart = Date.now();
     s.busy = true;
-    this.write(s, { type: 'user', message });
+    // (the first message of a new chat process waits for its MCP servers: waitMcp)
+    if (s.mcpReady) s.mcpReady.then(() => this.write(s, { type: 'user', message }));
+    else this.write(s, { type: 'user', message });
     this.push(s, { type: 'user', message, local: true });
     this.status(s);
     return true;

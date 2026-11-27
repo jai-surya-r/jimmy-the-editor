@@ -11,7 +11,9 @@ const DEFAULTS = {
   recent: [], // absolute paths of projects opened from outside projectsRoot
   hiddenProjects: [], // ids of projects in projectsRoot taken off the Home list (Remove from list); the folders stay
   proxy: { mode: 'auto' }, // auto | always | never
-  performance: { usage: 70, threads: 'auto', priority: 'low', jobs: 2 }, // usage: 25 | 50 | 70 | 100 (% of the machine); priority: normal | low | idle
+  // usage: 25 | 50 | 70 | 100 (% of the machine); priority: normal | low | idle; profile: auto (the power tier the machine
+  // test measured, server/machine.js) | light | balanced | full
+  performance: { usage: 70, threads: 'auto', priority: 'low', jobs: 2, profile: 'auto' },
   // Background pre-rendering of timeline chunks (server/prerender.js). maxGB caps the chunk cache across all projects.
   prerender: { enabled: true, quality: 'high', maxGB: 20, pauseOnBattery: true, light: true },
 };
