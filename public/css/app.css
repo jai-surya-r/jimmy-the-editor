@@ -1639,3 +1639,12 @@ mark.hl { background: rgba(245, 196, 81, 0.38); color: inherit; border-radius: 3
 .cc-mcp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 4px 0; font-size: 11px; color: var(--text-3, var(--text-2)); min-width: 0; }
 .cc-mcp > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-mcp-off { color: var(--warn, #e3b341); }
+/* chat footer: context, limits and MCP list on the left, the MCP switch on the right, never on top of each other */
+.cc-foot { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.cc-foot-main { flex: 1 1 auto; min-width: 0; }
+.cc-mcp-switch { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-top: 3px; height: 22px; padding: 0 9px; border-radius: 11px;
+  border: 1px solid var(--line-2); background: transparent; color: var(--muted); font-size: 11px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.cc-mcp-switch:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.cc-mcp-switch.is-on { color: var(--text); border-color: var(--line-2); background: var(--panel-3); }
+.cc-mcp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint, #666); }
+.cc-mcp-switch.is-on .cc-mcp-dot { background: var(--ok); box-shadow: 0 0 0 2px rgba(61, 220, 151, 0.18); }

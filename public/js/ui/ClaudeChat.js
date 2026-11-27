@@ -8,6 +8,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { createStore, useStore, loadPref, savePref } from '../core/store.js';
 import { get, post } from '../core/api.js';
 import { notify } from '../core/notify.js';
+import { app } from '../core/app.js';
 import { timecode, clipEnd, trackLabel, findSequence } from '../core/model.js';
 import { markdown } from './markdown.js';
 import { openAccounts } from './accounts.js';
@@ -371,6 +372,30 @@ function McpLine({ mcp }) {
     <span>MCP: ${on.map(nm).join(' · ') || 'none connected'}${wait.length ? ` · ${wait.length} connecting…` : ''}</span>
     ${off.length ? html`<span class="cc-mcp-off">${off.map((x) => `${nm(x)} ${x.status === 'needs-auth' ? 'needs sign-in' : x.status}`).join(' · ')}</span>` : null}
   </div>`;
+}
+
+// The switch for the account's claude.ai connectors (Drive, Docs, image generators…) in this project's chat, at the
+// right of the footer: on, the chat has the MCP tools Claude has in a terminal; off, only the servers set up in Claude
+// Code itself. It is one setting for every chat (data/config.json chatConnectors). A chat that is running and idle
+// restarts on the same conversation so the change applies now; a busy one gets it from its next start.
+function McpSwitch({ pid, info, busy, running }) {
+  const on = useStore(app, (x) => x.server?.chatConnectors !== false);
+  const [saving, setSaving] = useState(false);
+  if (info?.agent === 'codex') return null;
+  const n = (info?.mcp || []).filter((x) => x.status === 'connected').length;
+  const flip = async () => {
+    setSaving(true);
+    try {
+      await post('/api/settings', { chatConnectors: !on });
+      app.set((x) => ({ ...x, server: { ...x.server, chatConnectors: !on } }));
+      if (running && !busy && info?.sessionId) await startChat(pid, 'resume', info.sessionId);
+      else if (running) notify(`claude.ai connectors ${on ? 'off' : 'on'} from this chat's next start (it is busy now)`, 'info');
+    } catch (e) { notify(e.message, 'error'); } finally { setSaving(false); }
+  };
+  return html`<button class=${`cc-mcp-switch ${on ? 'is-on' : ''}`} disabled=${saving} aria-pressed=${on} onClick=${flip}
+    title=${on ? `claude.ai connectors are on: the chat has the same MCP tools as Claude in a terminal${n ? ` (${n} connected)` : ''}. Click to turn them off (MCP servers set up in Claude Code itself stay).` : 'claude.ai connectors are off: only MCP servers set up in Claude Code itself. Click to turn them on.'}>
+    <span class="cc-mcp-dot"></span><${Icon} name="layers" size=${12} />MCP ${saving ? '…' : on ? 'on' : 'off'}
+  </button>`;
 }
 
 export function Limits({ limits }) {
@@ -901,9 +926,14 @@ Output: ${u.output.toLocaleString()} (Claude's writing and thinking)`;
             : html`<button class="cc-send" title=${target.away ? `Send to the "${target.seq?.name}" chat (Enter)` : 'Send (Enter)'} disabled=${(!text.trim() && !files.length) || (target.away && target.busy)} onClick=${submit}><${Icon} name="arrowUp" size=${16} /></button>`}
         </div>
       </div>
-      <${Context} info=${info} busy=${busy} running=${running} onNew=${onNew} onCompact=${() => { stick.current = true; wsSend(s, { t: 'send', text: '/compact' }); }} />
-      <${Limits} limits=${info.limits} />
-      <${McpLine} mcp=${info.mcp} />
+      <div class="cc-foot">
+        <div class="cc-foot-main">
+          <${Context} info=${info} busy=${busy} running=${running} onNew=${onNew} onCompact=${() => { stick.current = true; wsSend(s, { t: 'send', text: '/compact' }); }} />
+          <${Limits} limits=${info.limits} />
+          <${McpLine} mcp=${info.mcp} />
+        </div>
+        <${McpSwitch} pid=${pid} info=${info} busy=${busy} running=${running} />
+      </div>
       <div class="cc-hint">${st.connected ? html`Enter to send · Shift+Enter for a new line${busy ? ' · Esc to stop' : ''}` : 'Reconnecting…'}</div>
     </div>
     ${drag ? html`<div class="cc-drop"><${Icon} name="upload" size=${22} />Drop images or files to attach</div>` : null}

@@ -14,7 +14,7 @@ import { GuidesOverlay, GuideButtons } from './Guides.js';
 import { LiveMotionLayers } from './motion.js';
 import { shortcutLabel } from './keymap.js';
 
-const QUALITY = { auto: 1, full: 1, half: 0.5, quarter: 0.25 };
+const QUALITY = { auto: 1, full: 1, half: 0.5, quarter: 0.25, eighth: 0.125 };
 
 // readOnly (Review): no layer handles or guides, no header or transport; children sit over the frame.
 export function Viewer({ tab, readOnly = false, children = null }) {
@@ -398,7 +398,7 @@ export function Viewer({ tab, readOnly = false, children = null }) {
       <${Select} class="select-sm" value=${zoomMode} title="Zoom" onChange=${(v) => tab.ui.set({ viewerZoom: v })}
         options=${[{ value: 'fit', label: 'Fit' }, { value: '0.25', label: '25%' }, { value: '0.5', label: '50%' }, { value: '1', label: '100%' }]} />
       <${Select} class="select-sm" value=${quality} title=${quality === 'auto' && autoCap < 1 ? `Preview resolution: Auto is at half size ${autoHalf ? 'because playback could not keep up' : 'on this computer (Settings › Power profile)'}` : 'Preview resolution'} onChange=${(v) => tab.ui.set({ quality: v, autoHalf: false })}
-        options=${[{ value: 'auto', label: quality === 'auto' && autoCap < 1 ? 'Auto · 1/2' : 'Auto' }, { value: 'half', label: '1/2' }, { value: 'quarter', label: '1/4' }]} />
+        options=${[{ value: 'auto', label: quality === 'auto' && autoCap < 1 ? 'Auto · 1/2' : 'Auto' }, { value: 'full', label: 'Full' }, { value: 'half', label: '1/2' }, { value: 'quarter', label: '1/4' }, { value: 'eighth', label: '1/8' }]} />
     </header>`}
     <div class="viewer-stage ${view ? 'is-zoomed' : zoomMode !== 'fit' ? 'is-scroll' : ''}" ref=${wrapRef} onDblClick=${(e) => { if (e.target === wrapRef.current) setView(null); }}>
       ${view ? html`<button class="viewer-zoom-badge" title="Back to Fit (or double-click the background)" onClick=${() => setView(null)}>${Math.round(z * 100)}% · Fit</button>` : null}
