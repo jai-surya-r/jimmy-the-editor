@@ -595,8 +595,8 @@ const commands = {
     if (!r.ok) process.exit(1);
   },
 
-  // vedit browser <open|look|click|type|key|scroll|back|forward|reload|shot|save|wait|state|show> — the Browser tab's
-  // web view (desktop app), the same one the person sees and signs in with (electron/browser.js)
+  // vedit browser <open|look|click|type|key|scroll|back|forward|reload|shot|save|wait|tabs|newtab|tab|closetab|state|show>
+  // — the Browser tab's web views (desktop app), the same ones the person sees and signs in with (electron/browser.js)
   async browser() {
     const sub = pos[0];
     const body = { op: sub };
@@ -607,6 +607,9 @@ const commands = {
     else if (sub === 'key') body.key = pos[1] || 'Enter';
     else if (sub === 'scroll') Object.assign(body, { dir: pos[1] === 'up' ? 'up' : 'down', times: Number(pos[2] || opts.times || 1) });
     else if (sub === 'wait') body.what = pos.slice(1).join(' ') || '1000';
+    else if (sub === 'newtab') body.url = pos.slice(1).join(' ');
+    else if (sub === 'tab') { need(/^\d+$/.test(pos[1] || ''), 'tab <number from vedit browser tabs>'); body.n = Number(pos[1]); }
+    else if (sub === 'closetab') { if (pos[1]) { need(/^\d+$/.test(pos[1]), 'closetab [number]'); body.n = Number(pos[1]); } }
     else if (sub === 'shot') {
       if (!dir) die('no project.json found in this folder or its parents (screenshots go into the project)');
       body.file = path.resolve(opts.out ? String(opts.out) : path.join(layoutFor(dir).files, 'browser', `page-${Date.now()}.png`));
@@ -615,8 +618,8 @@ const commands = {
       if (!dir) die('no project.json found in this folder or its parents (images are saved into the project)');
       const L = layoutFor(dir);
       Object.assign(body, { target: pos[1], dir: path.resolve(opts.to ? String(opts.to) : (typeof L.upload === 'function' ? L.upload('image') : path.join(dir, 'media'))), name: opts.name });
-    } else if (!['look', 'back', 'forward', 'reload', 'state', 'show'].includes(sub)) {
-      die('usage: vedit browser open|look|click|type|key|scroll|back|forward|reload|shot|save|wait|state|show (see vedit help)');
+    } else if (!['look', 'back', 'forward', 'reload', 'state', 'show', 'tabs'].includes(sub)) {
+      die('usage: vedit browser open|look|click|type|key|scroll|back|forward|reload|shot|save|wait|tabs|newtab|tab|closetab|state|show (see vedit help)');
     }
     const r = await call('POST', '/api/browser', body);
     console.log(r.text);
@@ -676,7 +679,8 @@ const commands = {
   vedit browser …   the Browser tab (desktop app): the same browser the user sees, with their logins
     open <url | search words> · look (page text + [ids] to act on) · click <id | text> · type <id> "text" [--enter]
     key Enter|Tab|Escape|PageDown · scroll [down|up] [n] · back · forward · reload · wait <ms | text>
-    shot [--out f.png] (screenshot → Read it) · save <image id | url> [--to folder] [--name n] · state · show`);
+    shot [--out f.png] (screenshot → Read it) · save <image id | url> [--to folder] [--name n] · state · show
+    tabs (list) · newtab [url | search] · tab <n> (bring to front) · closetab [n]   (commands act on the tab in front)`);
   },
 };
 

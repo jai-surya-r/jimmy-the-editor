@@ -30,6 +30,17 @@ Software shipped with or built into Jimmy - The Editor, and its licences.
 ## npm dependencies
 
 - preact (MIT), htm (Apache-2.0), @xterm/xterm and @xterm/addon-fit (MIT), ws (MIT), @lydell/node-pty (MIT).
+- Ghostery's ad blocker for the Browser tab (electron/adblock.js): @ghostery/adblocker-electron and the packages it
+  pulls in (@ghostery/adblocker, -content, -electron-preload, -extended-selectors, @ghostery/url-parser,
+  @remusao/guess-url-type, small, smaz, smaz-compress, smaz-decompress, trie), all Mozilla Public License 2.0, used
+  unchanged; source at https://github.com/ghostery/adblocker. tldts-experimental and tldts-core (MIT).
+
+## Filter lists (downloaded, not shipped)
+
+- The Browser tab's ad blocking downloads public filter lists at run time and keeps them in the app's data folder:
+  EasyList and EasyPrivacy (GPL v3 / CC BY-SA 3.0), uBlock Origin's filter lists and resources (GPL v3) and Peter
+  Lowe's ad server list, through the copies Ghostery keeps at https://github.com/ghostery/adblocker. None of them are
+  part of the app's files.
 
 ## Icons
 

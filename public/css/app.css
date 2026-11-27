@@ -1603,3 +1603,35 @@ mark.hl { background: rgba(245, 196, 81, 0.38); color: inherit; border-radius: 3
   color: var(--claude, #d97757); background: var(--claude-soft, rgba(217, 119, 87, 0.15)); white-space: nowrap; }
 .browser-page { flex: 1; min-height: 0; position: relative; background: #fff; }
 .browser-covered { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--panel); color: var(--text-3, var(--text-2)); font-size: 13px; }
+.browser-tabs { display: flex; align-items: flex-end; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line); background: var(--panel-2); overflow-x: auto; scrollbar-width: none; flex-shrink: 0; }
+.browser-tab { display: flex; align-items: center; gap: 6px; flex: 0 1 200px; min-width: 64px; height: 30px; padding: 0 4px 0 10px; border-radius: 8px 8px 0 0;
+  font-size: 12px; color: var(--text-2); cursor: default; user-select: none; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; }
+.browser-tab:hover { background: var(--panel-3); }
+.browser-tab.is-active { background: var(--panel); color: var(--text); border-color: var(--line); }
+.browser-tab.is-drag { opacity: 0.45; }
+.browser-tab-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.browser-fav { width: 14px; height: 14px; flex: none; }
+.browser-tab-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; border: 0; background: none; color: inherit; opacity: 0.6; }
+.browser-tab-x:hover { opacity: 1; background: var(--panel-3); }
+.browser-tab-new { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 26px; margin: 0 0 3px 2px; border: 0; border-radius: 6px; background: none; color: var(--text-2); }
+.browser-tab-new:hover { background: var(--panel-3); color: var(--text); }
+.browser-shield { display: inline-flex; align-items: center; gap: 4px; height: 26px; min-width: 44px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); background: none;
+  font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ok, #3fb950); }
+.browser-shield.is-off { color: var(--text-3, var(--text-2)); }
+.browser-shield.is-waiting { color: var(--text-3, var(--text-2)); }
+.browser-shield:not(:disabled):hover { background: var(--panel-3); }
+.browser-stopped { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--text-2); }
+/* background work: one fixed-size icon in the top bar (App.js ActivityButton) */
+.activity-btn { position: relative; width: 30px; height: 30px; padding: 0; flex: none; color: var(--text-3, var(--text-2)); }
+.activity-btn.has-work { color: var(--text-2); }
+.activity-btn.is-busy { color: var(--accent-2); }
+.activity-ring { position: absolute; inset: 0; width: 30px; height: 30px; transform: rotate(-90deg); pointer-events: none; }
+.activity-ring circle { fill: none; stroke-width: 2; }
+.activity-track { stroke: transparent; }
+.activity-btn.is-busy .activity-track { stroke: var(--line-2); }
+.activity-fill { stroke: var(--accent-2); stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
+.activity-badge { position: absolute; top: -1px; right: -3px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; box-sizing: border-box;
+  font-size: 9px; font-weight: 600; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; background: var(--accent); color: var(--on-accent); pointer-events: none; }
+.jobs-section { display: flex; flex-direction: column; gap: 4px; }
+.jobs-section + .jobs-section { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.jobs-section-head { display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 8px; font-size: 12px; }

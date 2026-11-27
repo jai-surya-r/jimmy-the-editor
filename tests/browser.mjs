@@ -30,6 +30,12 @@ const site = http.createServer((req, res) => {
   if (u.pathname === '/pic.png') { res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(PNG); }
   if (u.pathname === '/login') return send(page('Sign in', '<a href="/signin">Sign in</a>'));
   if (u.pathname === '/signin') return send(page('Signed in', '<p>Welcome</p>'), { 'Set-Cookie': 'who=tester; Max-Age=86400; Path=/' });
+  if (u.pathname === '/tabs') return send(page('Tabs test', `<a href="/page2" target="_blank">New tab link</a>
+    <button onclick="window.open('/signin-window', 'signin', 'width=420,height=520')">Sign in with a window</button>
+    <script>addEventListener('message', (e) => { if (e.data === 'signed-in') document.title = 'Got the sign-in'; });
+      setTimeout(() => window.open('/page2'), 300);</script>`));
+  if (u.pathname === '/signin-window') return send(page('Sign-in window', '<p>Signing in</p><script>setTimeout(() => { window.opener.postMessage("signed-in", "*"); window.close(); }, 400);</script>'));
+  if (u.pathname === '/ads') return send(page('Ads test', '<p>A page with ads</p><script src="https://securepubads.g.doubleclick.net/tag/js/gpt.js"></script><script src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>'));
   if (u.pathname === '/me') return send(page('Me', `<p>${/who=tester/.test(req.headers.cookie || '') ? 'Signed in as tester' : 'Not signed in'}</p>`));
   res.writeHead(404); res.end();
 });
@@ -102,6 +108,52 @@ try {
   const shot = (r.text.match(/: (.+\.png)\s*$/) || [])[1];
   if (shot) saved.push(shot);
   ok(shot && fs.existsSync(shot) && fs.statSync(shot).size > 1000, `screenshot (${r.text.trim()})`);
+
+  console.log('tabs and pop-ups');
+  const tabCount = async () => (await page2.call(() => window.jimmyApp.browser.call('state'))).tabs.length;
+  const n0 = await tabCount();
+  await vedit('open', `${SITE}/tabs`);
+  await sleep(1200);
+  st = await page2.call(() => window.jimmyApp.browser.call('state'));
+  ok(st.tabs.length === n0 && /page2/.test(st.stopped?.url || ''), `a pop-up nobody clicked for is blocked, and the toolbar says so (${JSON.stringify(st.stopped)})`);
+  ok(await page2.call(() => /Blocked a pop-up/.test(document.querySelector('.browser-stopped')?.textContent || '')), 'the note under the toolbar shows it');
+  r = await vedit('click', 'New tab link');
+  st = await page2.call(() => window.jimmyApp.browser.call('state'));
+  ok(st.tabs.length === n0 + 1 && /page2/.test(st.url) && /new tab/.test(r.text), `a link that opens a new tab gets one, in front (${r.text.trim().slice(0, 90)})`);
+  ok(await page2.call(() => document.querySelectorAll('.browser-tab').length) === st.tabs.length, 'the tab strip shows every tab');
+  r = await vedit('tabs');
+  ok(/\* 2\. Second page/.test(r.text) && /1\. Tabs test/.test(r.text), `vedit browser tabs lists them (${r.text.trim().replace(/\n/g, ' | ')})`);
+  r = await vedit('tab', '1');
+  ok(/Tabs test/.test(r.text), `vedit browser tab 1 brings the first to the front (${r.text.trim()})`);
+  r = await vedit('click', 'Sign in with a window');
+  await sleep(2000);
+  st = await page2.call(() => window.jimmyApp.browser.call('state'));
+  ok(st.title === 'Got the sign-in' && st.tabs.length === n0 + 1, `a sign-in window opens as a window and the page hears back from it (title "${st.title}")`);
+  r = await vedit('closetab', '2');
+  ok(await tabCount() === n0, `closetab (${r.text.trim().split('\n')[0]})`);
+  await page2.call(() => window.jimmyApp.browser.call('newtab', 'about:blank'));
+  await sleep(400);
+  ok(await tabCount() === n0 + 1 && await page2.call(() => document.querySelectorAll('.browser-tab').length) === n0 + 1, 'the + button\'s new tab');
+  await page2.call(() => window.jimmyApp.browser.call('close'));
+  await sleep(300);
+  ok(await tabCount() === n0, 'closing it');
+
+  console.log('ads');
+  await vedit('open', `${SITE}/ads`);
+  let ads = null;
+  for (let i = 0; i < 40; i++) { ads = (await page2.call(() => window.jimmyApp.browser.call('state'))).ads; if (ads?.working && ads.blocked >= 2) break; await sleep(500); }
+  ok(ads?.working && ads.blocked >= 2, `ad scripts are blocked (${JSON.stringify(ads)})`);
+  await page2.call(() => window.jimmyApp.browser.call('ads', false));
+  await sleep(1500);
+  ads = (await page2.call(() => window.jimmyApp.browser.call('state'))).ads;
+  ok(ads.off === true, 'the shield switches blocking off for a site');
+  await page2.call(() => window.jimmyApp.browser.call('ads', true));
+  await sleep(500);
+  ok((await page2.call(() => window.jimmyApp.browser.call('state'))).ads.off === false, '…and back on');
+
+  console.log('the top bar');
+  const act = await page2.call(() => { const b = document.querySelector('.activity-btn'); const q = b?.getBoundingClientRect(); return q && { w: Math.round(q.width), n: document.querySelectorAll('.jobs-btn').length }; });
+  ok(act?.w === 30 && act.n === 1, `one fixed-size icon for exports, graphics and proxies (${JSON.stringify(act)})`);
 
   console.log('in the background, and around dialogs');
   await page2.call(() => window.__jimmy.activeTab().ui.set({ mode: 'edit' }));

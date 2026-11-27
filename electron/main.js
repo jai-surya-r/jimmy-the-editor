@@ -44,6 +44,9 @@ function setUp() {
   // Motion graphics render in hidden windows of the app (server/apphost.js): on laptops with two GPUs they draw
   // on the fast one, as the headless browser did (about 2.5x faster per frame).
   app.commandLine.appendSwitch('force_high_performance_gpu');
+  // Windows stops drawing a window other windows cover: the Browser tab's pages would then ignore Claude's clicks and
+  // key presses and give no screenshots while the person works in another app (electron/browser.js)
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
   // tests drive the editor window over the DevTools protocol (tests/perf-day.mjs); never set in normal use
   if (process.env.JIMMY_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.JIMMY_DEBUG_PORT);
   // tests: V8 flags for the pages (e.g. --prof, a tick log that works even while a page is stuck)
@@ -168,7 +171,7 @@ function start() {
     win.webContents.on('responsive', () => server.perflog?.event('editorResponsive', {}));
     // Closing the editor window ends the app (on a Mac too: Jimmy has nothing to show without it), and with it
     // the server, its Claude sessions and the hidden render windows.
-    win.on('closed', () => { win = null; server.shutdown(); });
+    win.on('closed', () => { win = null; browser.close(); server.shutdown(); });
     win.loadURL(url);
   }
 
