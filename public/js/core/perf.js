@@ -11,6 +11,8 @@ export function noteRequest(method, url, ms) {
 
 // what a Ctrl or Alt wheel did on the timeline (the log shows what the app really received)
 export const noteWheel = (what) => push({ kind: 'wheel', t: Date.now(), ms: 0, what });
+// playback's audio going wrong and what was done about it (core/playback.js): a file that failed, a stalled output
+export const noteAudio = (what) => push({ kind: 'audio', t: Date.now(), ms: 0, what });
 
 // counts other modules report for the 'mem' line (caches, players): registerStats('textCache', () => n)
 const statFns = new Map();

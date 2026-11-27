@@ -6,11 +6,14 @@ import {
 } from './model.js';
 import { OFFLINE } from './compositor.js';
 import { mediaUrl, post, socket } from './api.js';
+import { noteAudio } from './perf.js';
 
 // Browsers refuse a playbackRate outside this range (the assignment throws), e.g. a 5% clip or a 4x clip shuttled at 8x.
 const mediaRate = (r) => Math.min(16, Math.max(0.0625, r));
 
 let graph = null;
+// Bumped when the audio graph is replaced (rebuildAudio): every engine then makes its clips' audio again on the new one.
+let graphGen = 0;
 export function audioGraph() {
   if (!graph) {
     const actx = new AudioContext({ latencyHint: 'interactive' });
@@ -33,6 +36,25 @@ export function resumeAudio() {
   const { actx } = audioGraph();
   if (actx.state !== 'running') actx.resume().catch(() => {});
 }
+// An audio context whose clock stopped while it should be playing (its output device went away, or the system's
+// audio was starved while the machine was busy rendering) stays silent: replace it, keeping the master volume.
+let rebuiltAt = 0;
+function rebuildAudio(why) {
+  const now = performance.now();
+  if (now - rebuiltAt < 10000) return false; // not in a loop: once every 10 s at most
+  rebuiltAt = now;
+  const old = graph;
+  graph = null;
+  graphGen++;
+  const g = audioGraph();
+  if (old) {
+    g.master.gain.value = old.master.gain.value;
+    old.actx.close().catch(() => {});
+  }
+  g.actx.resume().catch(() => {});
+  noteAudio(`audio output rebuilt: ${why}`);
+  return true;
+}
 
 export class PlaybackEngine {
   constructor(tab) {
@@ -54,6 +76,7 @@ export class PlaybackEngine {
     this.drawUntil = 0;
     this.loop = false;
     this.frame = [];
+    this.audioGen = graphGen;
   }
 
   get seq() { return this.tab.playSeq; } // nested sequences play their contents
@@ -99,6 +122,7 @@ export class PlaybackEngine {
     this.lastPlayFrame = null;
     this.syncedFrame = null;
     this.syncedAt = 0;
+    this.clockSince = null; // watchAudio starts counting afresh
     this.tab.time.set({ t: this.t, playing: true });
   }
   pause() {
@@ -169,7 +193,10 @@ export class PlaybackEngine {
       this.invalidate();
     });
     el.addEventListener('error', () => {
+      if (!el.getAttribute('src')) return; // released on purpose
       entry.error = true;
+      entry.errAt = performance.now();
+      noteAudio(`${kind} element failed (code ${el.error?.code ?? '?'}${el.error?.message ? `: ${el.error.message}` : ''}) for ${entry.mediaId || 'a file'}`);
       this.invalidate();
       // the browser can't decode this file — ask the server for a proxy
       if (entry.mediaId) post(`/api/p/${this.tab.projectId}/media/${entry.mediaId}/proxy`).catch(() => {});
@@ -203,9 +230,28 @@ export class PlaybackEngine {
     return im;
   }
 
+  // A failed element (a read that broke off while the disk was busy rendering, say) is not kept for good: after a
+  // second it is dropped, so the clip gets a new one. A file that keeps failing is tried 5 times a minute at most
+  // (it shows as offline meanwhile; the server is also asked for a playable copy).
+  retryFailed(pool, byClip, e) {
+    const now = performance.now();
+    if (now - (e.errAt || 0) < 1000) return false;
+    const r = (this.retries ||= new Map()).get(e.url);
+    const tries = r && now - r.at < 60000 ? r : { n: 0, at: now };
+    if (tries.n >= 5) return false;
+    tries.n++;
+    this.retries.set(e.url, tries);
+    this.release(e);
+    pool.delete(e.key);
+    for (const [cid, x] of byClip) if (x === e) byClip.delete(cid);
+    noteAudio(`trying a failed ${pool === this.audios ? 'audio' : 'video'} element again (${tries.n} of 5 this minute)`);
+    return true;
+  }
+
   // Element for this clip: the one it already holds, else a free pooled one for the same file, else a new one.
   acquire(pool, byClip, c, url, create) {
     let e = byClip.get(c.id);
+    if (e?.error && this.retryFailed(pool, byClip, e)) e = null;
     if (e && (e.owner !== c.id || e.url !== url || !pool.has(e.key) || e.frame === this.frameNo)) e = null;
     if (!e) {
       for (const x of pool.values()) if (x.url === url && x.frame !== this.frameNo && !x.error) { e = x; break; }
@@ -235,7 +281,7 @@ export class PlaybackEngine {
       if (Math.abs(el.playbackRate - rate) > 1e-3) el.playbackRate = rate;
       if (el.paused) {
         if (Math.abs(el.currentTime - target) > 0.04) el.currentTime = target;
-        if (!el.ended) el.play()?.catch(() => {}); // play() on a finished file would restart it from 0
+        if (!el.ended) el.play()?.catch((err) => this.playRefused(e, 'video', err)); // play() on a finished file would restart it from 0
       } else if (!el.seeking && Math.abs(el.currentTime - target) > 0.3) {
         el.currentTime = target;
       }
@@ -273,7 +319,7 @@ export class PlaybackEngine {
       if (Math.abs(el.playbackRate - rate) > 1e-3) el.playbackRate = rate;
       if (el.paused) {
         if (Math.abs(el.currentTime - target) > 0.04) el.currentTime = target;
-        if (!el.ended) el.play()?.catch(() => {});
+        if (!el.ended) el.play()?.catch((err) => this.playRefused(e, 'audio', err));
       } else if (!el.seeking && Math.abs(el.currentTime - target) > 0.2) {
         el.currentTime = target;
       }
@@ -281,6 +327,34 @@ export class PlaybackEngine {
       if (!el.paused) el.pause();
       if (!el.seeking && Math.abs(el.currentTime - target) > 0.05) el.currentTime = target;
     }
+  }
+
+  // play() said no. Interrupted by a seek or a pause (AbortError): nothing wrong, the next frame asks again. Not
+  // allowed (the audio isn't unlocked): unlock it. The file can't be played (NotSupportedError): it counts as failed,
+  // so it is made again (retryFailed) instead of being asked to play, silently, on every frame.
+  playRefused(e, kind, err) {
+    if (err?.name === 'AbortError') return;
+    if (err?.name === 'NotAllowedError') { resumeAudio(); return; }
+    if (!e.error) noteAudio(`${kind} play() refused: ${err?.name || 'error'}${err?.message ? ` (${err.message})` : ''}`);
+    e.error = true;
+    e.errAt = performance.now();
+    this.invalidate();
+  }
+
+  // While playing: is the audio output actually running? A context that the system suspended is resumed; one whose
+  // clock stands still although clips should be sounding (the output stalled under load) is replaced (rebuildAudio),
+  // and every clip's audio is made again on the new one at the next frame.
+  watchAudio(now) {
+    const { actx } = audioGraph();
+    const sounding = [...this.audios.values()].some((e) => !e.el.paused && !e.el.seeking && e.el.readyState >= 3 && clipActiveAt(e.clip, this.t));
+    if (!sounding) { this.clockSince = null; return; }
+    if (actx.state !== 'running' && now - (this.resumedAt || 0) > 500) {
+      this.resumedAt = now;
+      noteAudio(`audio output was "${actx.state}" while playing: resumed`);
+      actx.resume().catch(() => {});
+    }
+    if (this.clockSince == null || actx.currentTime !== this.clockAt) { this.clockSince = now; this.clockAt = actx.currentTime; return; }
+    if (now - this.clockSince > 1500 && rebuildAudio(`its clock stood still for ${Math.round(now - this.clockSince)} ms while playing (state "${actx.state}")`)) this.clockSince = null;
   }
 
   // Time implied by a playing element, used to keep the wall clock honest.
@@ -333,6 +407,7 @@ export class PlaybackEngine {
       // the playhead's time for the page: once per frame (the timeline, timecodes and time bars redraw on it)
       const f = this.playFrame();
       if (f !== this.shownFrame) { this.shownFrame = f; this.tab.time.set({ t }); }
+      if (this.rate > 0) this.watchAudio(now);
       // the sources follow the playhead once per frame too (and at least 10 times a second, for their drift)
       if (f === this.syncedFrame && now - this.syncedAt < 100) return;
       this.syncedFrame = f;
@@ -342,6 +417,13 @@ export class PlaybackEngine {
   }
 
   sync(now) {
+    // the audio output was replaced (rebuildAudio): this tab's clip audio belongs to the old one, so make it again
+    if (this.audioGen !== graphGen) {
+      for (const e of this.audios.values()) this.release(e);
+      this.audios.clear();
+      this.clipAudio.clear();
+      this.audioGen = graphGen;
+    }
     const seq = this.seq;
     const t = this.t;
     const playing = this.playing && this.rate > 0;
