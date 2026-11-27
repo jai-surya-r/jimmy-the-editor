@@ -20,6 +20,7 @@ import { ExportDialog, SettingsDialog, GpuAskDialog, confirmDialog } from './dia
 import { openShortcuts } from './shortcuts.js';
 import { commandOf, shortcutLabel } from './keymap.js';
 import { MotionMode } from './MotionMode.js';
+import { BrowserMode, hasBrowser, listenBrowserShow } from './BrowserMode.js';
 import { startAutoFix } from './autofix.js';
 
 export function App() {
@@ -29,6 +30,8 @@ export function App() {
   const tab = getTab(activeId);
   const projectName = useStore(tab?.store, (s) => s.doc?.name);
   useEffect(() => { document.title = projectName ? `${projectName} · Jimmy - The Editor` : 'Jimmy - The Editor'; }, [projectName]);
+  // Claude asking to see the browser (vedit browser show) opens the Browser tab
+  useEffect(() => listenBrowserShow(), []);
   // a GPU that helps was found and nobody was asked yet: ask once
   const gpuAsk = useStore(app, (s) => s.server?.gpu?.ask);
   useEffect(() => { if (gpuAsk && !overlays.get().dialog) openDialog(GpuAskDialog, { device: gpuAsk }); }, [gpuAsk?.id]);
@@ -158,7 +161,8 @@ function TabControls({ tab }) {
         const clip = m === 'motion' && tab.seq?.clips.find((c) => tab.ui.get().selection?.includes(c.id) && tab.mediaById[c.media]?.motion);
         tab.ui.set({ mode: m, ...(clip ? { motionMedia: clip.media } : {}) });
       }}
-      options=${[{ value: 'edit', label: 'Edit', icon: 'scissors' }, { value: 'motion', label: 'Motion', icon: 'wand' }, { value: 'review', label: 'Review', icon: 'message', badge: openComments || null, title: openComments ? `Review · ${openComments} open comment${openComments === 1 ? '' : 's'}` : 'Review' }]} />
+      options=${[{ value: 'edit', label: 'Edit', icon: 'scissors' }, { value: 'motion', label: 'Motion', icon: 'wand' }, { value: 'review', label: 'Review', icon: 'message', badge: openComments || null, title: openComments ? `Review · ${openComments} open comment${openComments === 1 ? '' : 's'}` : 'Review' },
+        ...(hasBrowser() ? [{ value: 'browser', label: 'Browser', icon: 'globe', title: 'A browser inside Jimmy, shared with Claude (its logins stay in it)' }] : [])]} />
     <${Button} kind="primary" icon="download" title=${`Export (${shortcutLabel('app.export')})`} onClick=${() => openDialog(ExportDialog, { tab })}>Export</${Button}>
     <${IconButton} icon="sparkle" title="Claude panel" kbd=${shortcutLabel('app.claude')} active=${claudeOpen} onClick=${() => tab.ui.set({ claudeOpen: !claudeOpen })} />`;
 }
@@ -364,7 +368,7 @@ function Workspace({ tab }) {
         <${Button} kind="claude" icon="sparkle" onClick=${() => sendToClaude(tab, `project.json in this folder has a JSON syntax error (${projectError}). Please fix it so Jimmy can load it again.`)}>Ask Claude to fix</${Button}>
         <${Button} kind="ghost" onClick=${() => tab.restoreLastGood()} title="Overwrite project.json with the last version the editor loaded">Restore last good version</${Button}>
       </div>` : null}
-      ${mode === 'review' ? html`<${ReviewMode} tab=${tab} />` : mode === 'motion' ? html`<${MotionMode} tab=${tab} />` : html`<${EditMode} tab=${tab} />`}
+      ${mode === 'review' ? html`<${ReviewMode} tab=${tab} />` : mode === 'motion' ? html`<${MotionMode} tab=${tab} />` : mode === 'browser' ? html`<${BrowserMode} />` : html`<${EditMode} tab=${tab} />`}
     </div>
     ${claudeOpen
       ? html`<${Resizer} onPointerDown=${(e) => startClaude(e, -1)} /><div class="claude-dock" style=${{ width: `${claudeW}px` }}><${ClaudePanel} tab=${tab} /></div>`

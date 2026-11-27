@@ -454,6 +454,13 @@ route('POST', '/api/storage/clear', async (req) => {
 
 // where this project keeps After Effects projects (relative to its folder), for "convert to AE project"
 route('GET', '/api/p/:id/ae-folder', async (_req, { id }) => { const h = await needProject(id); return { rel: toPosix(path.relative(h.dir, h.layout.afterEffects)), template: !!h.layout.template, app: afterEffectsApp(), live: aeLive() }; });
+// The Browser tab's web view, driven by Claude (vedit browser …; electron/browser.js does the work in the app)
+route('POST', '/api/browser', async (req) => {
+  const body = await readJsonBody(req);
+  const { askMain, inServerChild } = await import('./apphost.js');
+  if (!inServerChild) throw httpError(409, 'The browser is part of the desktop app: open Jimmy as the app to use it.');
+  try { return { text: await askMain('browser', body, 90000) }; } catch (err) { throw httpError(400, err.message); }
+});
 // Jimmy's own connection to After Effects (server/aehost.js), for "vedit ae …"
 route('POST', '/api/ae', async (req) => aeCall(await readJsonBody(req)));
 route('GET', '/api/p/:id', async (_req, { id }) => {

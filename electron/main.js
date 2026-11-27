@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell, utilityProcess } from 'electron';
 import { runWorkerHost } from './worker-host.js';
+import { createBrowser } from './browser.js';
 
 // Node's file and hashing threads (4 by default): a file on a slow or disconnected network drive holds one for
 // seconds, and with all four held every save and read waits. Set before the pool starts (its first use).
@@ -96,6 +97,8 @@ function start() {
 
   let server = null;
   let win = null;
+  // the Browser tab's web view, shared by the person and Claude (electron/browser.js)
+  const browser = createBrowser({ getWin: () => win, onState: (st) => { if (win && !win.isDestroyed()) win.webContents.send('jimmy:browser-state', st); } });
   let quitting = false; // the person already agreed to quit (or nothing was running)
   let asking = false; // the "Quit anyway?" question is on screen
 
@@ -170,6 +173,9 @@ function start() {
   }
 
   // The system's file dialog for the editor (electron/preload.cjs): the chosen paths, [] when cancelled.
+  // the Browser tab's toolbar and placement (electron/preload.cjs)
+  ipcMain.handle('jimmy:browser', (e, op, arg) => (win && e.sender === win.webContents ? browser.ui(op, arg) : null));
+
   ipcMain.handle('jimmy:pick', async (e, o = {}) => {
     if (!win || e.sender !== win.webContents) return [];
     const mode = o.mode || 'media';
@@ -248,6 +254,8 @@ function start() {
         return p.send(method, params, ms);
       },
       trash: async ({ dir }) => { await shell.trashItem(dir); return true; },
+      // Claude driving the Browser tab's web view (vedit browser …)
+      browser: (a) => browser.claude(a),
     };
     child.on('message', (m) => {
       if (m?.t === 'ready') readyFn({ url: m.url });

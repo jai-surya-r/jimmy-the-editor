@@ -10,4 +10,12 @@ contextBridge.exposeInMainWorld('jimmyApp', {
   pathOf(file) {
     try { return webUtils.getPathForFile(file) || null; } catch { return null; }
   },
+  // the Browser tab (electron/browser.js): ops 'show' (true/false), 'bounds' ({x,y,width,height}), 'go' (url or
+  // search), 'back', 'forward', 'reload', 'stop', 'home', 'state'; onState(fn) hears every change; onShow(fn) is
+  // Claude asking for the tab to be shown. Both return a function that stops listening.
+  browser: {
+    call: (op, arg) => ipcRenderer.invoke('jimmy:browser', op, arg),
+    onState(fn) { const h = (_e, st) => fn(st); ipcRenderer.on('jimmy:browser-state', h); return () => ipcRenderer.removeListener('jimmy:browser-state', h); },
+    onShow(fn) { const h = () => fn(); ipcRenderer.on('jimmy:browser-show', h); return () => ipcRenderer.removeListener('jimmy:browser-show', h); },
+  },
 });

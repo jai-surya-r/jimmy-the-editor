@@ -24,7 +24,7 @@ for (let i = 1; i < argv.length; i++) {
     const k = eq < 0 ? a.slice(2) : a.slice(2, eq);
     const v = eq < 0 ? undefined : a.slice(eq + 1);
     if (v !== undefined) opts[k] = v;
-    else if (i + 1 < argv.length && !argv[i + 1].startsWith('--') && !['open', 'all', 'draft', 'final', 'copy', 'resolve', 'frames', 'no-version', 'full', 'inout', 'place', 'force', 'starter', 'replace', 'no-wait', 'none', 'cbr', 'mov'].includes(k)) opts[k] = argv[++i];
+    else if (i + 1 < argv.length && !argv[i + 1].startsWith('--') && !['open', 'all', 'draft', 'final', 'copy', 'resolve', 'frames', 'no-version', 'full', 'inout', 'place', 'force', 'starter', 'replace', 'no-wait', 'none', 'cbr', 'mov', 'enter'].includes(k)) opts[k] = argv[++i];
     else opts[k] = true;
   } else pos.push(a);
 }
@@ -595,6 +595,33 @@ const commands = {
     if (!r.ok) process.exit(1);
   },
 
+  // vedit browser <open|look|click|type|key|scroll|back|forward|reload|shot|save|wait|state|show> — the Browser tab's
+  // web view (desktop app), the same one the person sees and signs in with (electron/browser.js)
+  async browser() {
+    const sub = pos[0];
+    const body = { op: sub };
+    const need = (cond, usage) => { if (!cond) die(`usage: vedit browser ${usage}`); };
+    if (sub === 'open') { need(pos[1], 'open <url or search words>'); body.url = pos.slice(1).join(' '); }
+    else if (sub === 'click') { need(pos[1], 'click <id from look | visible text>'); body.target = pos.slice(1).join(' '); }
+    else if (sub === 'type') { need(pos[1] && pos[2] != null, 'type <id> "text" [--enter]'); Object.assign(body, { target: pos[1], text: pos.slice(2).join(' '), enter: !!opts.enter }); }
+    else if (sub === 'key') body.key = pos[1] || 'Enter';
+    else if (sub === 'scroll') Object.assign(body, { dir: pos[1] === 'up' ? 'up' : 'down', times: Number(pos[2] || opts.times || 1) });
+    else if (sub === 'wait') body.what = pos.slice(1).join(' ') || '1000';
+    else if (sub === 'shot') {
+      if (!dir) die('no project.json found in this folder or its parents (screenshots go into the project)');
+      body.file = path.resolve(opts.out ? String(opts.out) : path.join(layoutFor(dir).files, 'browser', `page-${Date.now()}.png`));
+    } else if (sub === 'save') {
+      need(pos[1], 'save <image id | image url> [--to folder] [--name name]');
+      if (!dir) die('no project.json found in this folder or its parents (images are saved into the project)');
+      const L = layoutFor(dir);
+      Object.assign(body, { target: pos[1], dir: path.resolve(opts.to ? String(opts.to) : (typeof L.upload === 'function' ? L.upload('image') : path.join(dir, 'media'))), name: opts.name });
+    } else if (!['look', 'back', 'forward', 'reload', 'state', 'show'].includes(sub)) {
+      die('usage: vedit browser open|look|click|type|key|scroll|back|forward|reload|shot|save|wait|state|show (see vedit help)');
+    }
+    const r = await call('POST', '/api/browser', body);
+    console.log(r.text);
+  },
+
   async focus() {
     const f = focus();
     console.log(f ? JSON.stringify(f, null, 2) : 'No editor focus recorded yet.');
@@ -645,7 +672,11 @@ const commands = {
   vedit motion frame <id|name> <seconds…> [key=value…] [--full | --scale 0.5]   render stills of the composition → PNG paths
   vedit motion render <id|name|all> [--force]   wait for renders; shows errors and page console messages
   vedit motion batch <id|name> <rows.csv|rows.json> [--folder Name]   one graphic per row (columns = params, "name")
-  vedit ae guide | state | run | frame | info | inspect | skill | save   build in After Effects (read "vedit ae guide" first)`);
+  vedit ae guide | state | run | frame | info | inspect | skill | save   build in After Effects (read "vedit ae guide" first)
+  vedit browser …   the Browser tab (desktop app): the same browser the user sees, with their logins
+    open <url | search words> · look (page text + [ids] to act on) · click <id | text> · type <id> "text" [--enter]
+    key Enter|Tab|Escape|PageDown · scroll [down|up] [n] · back · forward · reload · wait <ms | text>
+    shot [--out f.png] (screenshot → Read it) · save <image id | url> [--to folder] [--name n] · state · show`);
   },
 };
 
