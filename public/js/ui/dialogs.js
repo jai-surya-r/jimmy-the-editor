@@ -586,6 +586,7 @@ export function SettingsDialog({ close, init }) {
         ${gpuInfo?.failed ? html`<div class="error-box">The ${gpuInfo.failed.device} GPU failed during an export and is set aside until Jimmy restarts (or Detect again): ${gpuInfo.failed.reason}</div>` : null}
         ${usable.length ? html`<label class="field-row" style=${{ gap: '8px', alignItems: 'center' }}><span class="muted" style=${{ flex: 'none' }}>Use for exports</span>
           <${Select} value=${gpu.device || ''} onChange=${(v) => setG('device')(v || null)} options=${[{ value: '', label: 'None: CPU only' }, ...usable.map((d) => ({ value: d.id, label: d.name }))]} /></label>` : null}
+        ${gpuInfo?.settings?.auto && gpu.device === gpuInfo.settings.device ? html`<div class="muted">Chosen for you: it was faster in the test (Smart scheduling on a Mac). Pick "None: CPU only" to keep exports on the CPU.</div>` : null}
         ${gpu.device && usable.some((d) => d.id === gpu.device) ? html`
           <label class="field-row gpu-choice"><span class="muted">Draft exports</span><${Segmented} value=${gpu.draft} onChange=${setG('draft')} options=${[{ value: 'gpu', label: 'GPU' }, { value: 'cpu', label: 'CPU' }]} /></label>
           <label class="field-row gpu-choice"><span class="muted">High and standard exports, and pre-rendering</span><${Segmented} value=${gpu.high} onChange=${setG('high')} options=${[{ value: 'gpu', label: 'GPU' }, { value: 'cpu', label: 'CPU' }]} /></label>

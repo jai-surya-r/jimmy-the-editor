@@ -1648,3 +1648,5 @@ mark.hl { background: rgba(245, 196, 81, 0.38); color: inherit; border-radius: 3
 .cc-mcp-switch.is-on { color: var(--text); border-color: var(--line-2); background: var(--panel-3); }
 .cc-mcp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint, #666); }
 .cc-mcp-switch.is-on .cc-mcp-dot { background: var(--ok); box-shadow: 0 0 0 2px rgba(61, 220, 151, 0.18); }
+.jobs-easing > span { flex: 1 1 auto; min-width: 0; }
+.jobs-easing > .link-btn { flex: none; font-size: 11px; }

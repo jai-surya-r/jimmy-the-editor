@@ -89,13 +89,20 @@ export function perf() {
   if (Number(p.threads) > 0) threads = Math.min(threads, Number(p.threads)); // an explicit core cap from older settings still applies
   return { threads, usage, priority: p.priority || 'low', jobs: Math.max(1, Math.min(8, Number(p.jobs) || 2)) };
 }
+// The Mac's own Smart scheduling (exports first, Apple's media engines by default, render slots by what a chunk
+// really needs: budget.js, gpu.js, scheduler.js). Windows keeps the scheduling it has. (JIMMY_MAC_SCHEDULER: tests.)
+export const macScheduling = () => process.platform === 'darwin' || !!process.env.JIMMY_MAC_SCHEDULER;
+// Threads one chunk needs (server/gpu.js fills it in): 4, or on a Mac with Smart scheduling whose exports encode, and
+// heavy sources decode, on Apple's media engines, 2.5 (the CPU only draws the frames), except while you play or scrub:
+// then the old count, so the preview keeps what it had.
+export const slotHints = { perChunk: () => 4 };
 // How many chunks render at the same time (each one is a browser page, its decoders and an encoder),
 // and the threads each of those gets. Bounded by memory: a slot holds several uncompressed frames.
 export function renderSlots() {
   const { threads } = perf();
   const byMemory = Math.max(1, Math.floor(os.totalmem() / (3 * 1024 ** 3)));
   // (the power tier caps it: a small laptop renders one chunk at a time, server/tiers.js)
-  const slots = Math.max(1, Math.min(tierLimits().renderSlots, Math.floor(threads / 4), byMemory));
+  const slots = Math.max(1, Math.min(tierLimits().renderSlots, Math.floor(threads / slotHints.perChunk()), byMemory));
   return { slots, threads: Math.max(1, Math.floor(threads / slots)) };
 }
 // Threads for one job when several run side by side.

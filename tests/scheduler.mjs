@@ -63,4 +63,21 @@ assert.ok(a.shares.motion >= 1 && !a.held.length, 'a graphic asked for "now" ren
 a = allocate({ slots: 6, user: editing, pressure: calm, demand: { motion: { want: 8 } }, claude: 1 }, now);
 const b = allocate({ slots: 6, user: editing, pressure: calm, demand: { motion: { want: 8 } } }, now);
 assert.ok(a.shares.motion >= 1 && a.shares.motion < b.shares.motion, `${a.shares.motion} < ${b.shares.motion}`);
+// Mac (exportFirst): an export waiting ignores editing and Claude; playing, battery and memory still count and say so
+const exp = { export: { want: 6 } };
+const macEdit = allocate({ slots: 6, user: editing, pressure: calm, demand: exp, claude: 1, exportFirst: true }, now);
+assert.equal(macEdit.headroom, 6, JSON.stringify(macEdit));
+assert.deepEqual(macEdit.slowed, []);
+assert.ok(allocate({ slots: 6, user: editing, pressure: calm, demand: exp, claude: 1 }, now).headroom < 6, 'Windows keeps the old rule');
+const macPlay = allocate({ slots: 6, user: { playing: true }, pressure: { level: 0, battery: true }, demand: exp, claude: 1, exportFirst: true }, now);
+assert.ok(macPlay.headroom < 2.5 && macPlay.slowed.includes('playing') && macPlay.slowed.includes('battery'), JSON.stringify(macPlay));
+assert.equal(macPlay.headroom, allocate({ slots: 6, user: { playing: true }, pressure: { level: 0, battery: true }, demand: exp }, now).headroom, 'playing: what the preview had before');
+// Full speed: only memory counts
+const macRush = allocate({ slots: 6, user: { playing: true }, pressure: { level: 1, battery: true }, demand: exp, exportFirst: true, rush: true }, now);
+assert.equal(macRush.headroom, 3.6, JSON.stringify(macRush));
+assert.deepEqual(macRush.slowed, ['pressure']);
+// no export waiting: the usual formula, nothing slowed
+const macNone = allocate({ slots: 6, user: editing, pressure: calm, demand: { media: { want: 4 } }, claude: 1, exportFirst: true }, now);
+assert.equal(macNone.headroom, allocate({ slots: 6, user: editing, pressure: calm, demand: { media: { want: 4 } }, claude: 1 }, now).headroom);
+assert.deepEqual(macNone.slowed, []);
 console.log('scheduler: ok');

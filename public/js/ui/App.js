@@ -304,8 +304,14 @@ function MotionSection({ stack }) {
 
 function ExportsSection({ list, active, budget, onClose }) {
   if (!list.length) return null;
-  const easing = budget && (budget.level > 0 || budget.slots < budget.full)
-    ? `Renders are running gently: ${budget.level ? budget.reason : 'on battery'}. Full speed returns by itself.` : null;
+  // Mac, Smart scheduling: the plan says what slows the exports down, and "Full speed" overrides playing and battery
+  const why = { playing: 'while you play', scrubbing: 'while you scrub', battery: 'on battery', lagging: 'the preview was stuttering', pressure: budget?.reason || 'the computer is busy' };
+  const slowed = budget?.exportFirst ? (budget.slowed || []).map((k) => why[k]).filter(Boolean) : null;
+  const canRush = budget?.exportFirst && !budget.rush && (budget.slowed || []).some((k) => k !== 'pressure');
+  const easing = slowed ? (slowed.length ? `Exports are slowed down: ${[...new Set(slowed)].join(', ')}.${budget.rush ? ' Full speed is on (memory still counts).' : ' Full speed returns by itself.'}` : null)
+    : budget && (budget.level > 0 || budget.slots < budget.full)
+      ? `Renders are running gently: ${budget.level ? budget.reason : 'on battery'}. Full speed returns by itself.` : null;
+  const rush = () => post('/api/budget/rush', { on: true }).then((r) => app.set((s) => ({ ...s, server: { ...s.server, budget: r.budget } }))).catch((e) => notify(e.message, 'error'));
   const showVersion = (j) => {
     const t = [...(app.get().tabs.map(getTab))].find((x) => x?.projectId === j.projectId);
     if (t) { activate(t.id); t.ui.set({ mode: 'review', reviewVersion: j.versionId }); }
@@ -316,7 +322,7 @@ function ExportsSection({ list, active, budget, onClose }) {
       ${active.some((j) => !j.paused && j.status !== 'encoding') ? html`<button class="link-btn" title="Pause every export (rendered parts are kept)" onClick=${() => post('/api/jobs/pause-all', { paused: true }).catch((e) => notify(e.message, 'error'))}>Pause all</button>` : null}
       ${active.some((j) => j.paused) ? html`<button class="link-btn" onClick=${() => post('/api/jobs/pause-all', { paused: false }).catch((e) => notify(e.message, 'error'))}>Resume all</button>` : null}
     </div>
-    ${easing && active.length ? html`<div class="jobs-easing"><${Icon} name="alert" size=${12} />${easing}</div>` : null}
+    ${easing && active.length ? html`<div class="jobs-easing"><${Icon} name="alert" size=${12} /><span>${easing}</span>${canRush ? html`<button class="link-btn" title="Let the exports running now use the whole machine until they are done, even while you play (memory still counts)" onClick=${rush}>Full speed</button>` : null}</div>` : null}
     ${list.map((j) => html`<div class="job-row">
       <div class="job-top"><div class="job-names"><b>${j.label}</b>${j.projectName ? html`<span class="job-project"><${Icon} name="folder" size=${11} />${j.projectName}</span>` : null}</div><span class="job-status is-${j.paused ? 'paused' : j.status}">${j.paused && !['done', 'error', 'canceled', 'encoding'].includes(j.status) ? `paused · ${Math.round(j.progress * 100)}%` : j.status === 'running' && j.waiting ? `${j.waiting === 'export' ? 'after the export ahead' : 'after the graphic rendering'}${j.progress ? ` · ${Math.round(j.progress * 100)}%` : ''}` : j.status === 'running' ? `${Math.round(j.progress * 100)}%${j.eta != null ? ` · ${etaText(j.eta)} left` : ''}` : j.status === 'motion' ? 'rendering motion graphics' : j.status === 'encoding' && j.converting ? `converting to ${j.converting.fps} fps · ${Math.round(j.converting.progress * 100)}%` : j.status}</span></div>
       ${!DONE.includes(j.status) ? html`<div class="progress"><div style=${{ width: `${Math.round((j.progress || 0) * 100)}%` }}></div></div>` : null}

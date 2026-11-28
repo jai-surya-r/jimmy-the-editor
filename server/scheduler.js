@@ -27,6 +27,11 @@
 // Two rules on top: pre-rendering only gets a share while no export or graphic wants one (it is only a head start
 // for them), and preview files get every spare slot when nothing renders.
 //
+// On a Mac (exportFirst): an export is work you asked for and are waiting on, so while one waits neither your editing
+// nor Claude working slows it (Claude waiting on its own `vedit render` was counted as working): only playing or
+// scrubbing, memory, the machine falling behind and battery do, and the plan says which (slowed). "Full speed" in
+// the Exports list (rush) leaves only memory: a machine that swaps is slower for everything.
+//
 // Slot costs: one export or pre-render chunk (a page with its decoders and encoder) = 1; one page of a motion
 // graphic = 0.75 (about one core); one preview-file job = 0.5.
 
@@ -91,10 +96,25 @@ export const claudeFactor = (claude) => (claude > 0 ? 0.7 : 1);
 // demand: { motion: { want, waitingSince, rush }, export: { want, waitingSince }, media: { want, waitingSince, needed },
 //           prerender: { want, waitingSince, focused } }   want = how many items could run at once
 // claude: chats working
-// returns { headroom, mode, claude, held: [kinds waiting for you], shares: { kind: items allowed }, order, scores }
-export function allocate({ slots, user, pressure, demand, claude = 0 }, now = Date.now()) {
+// exportFirst: the Mac's rule above; rush: "Full speed"
+// returns { headroom, mode, claude, held: [kinds waiting for you], shares: { kind: items allowed }, order, scores,
+//           slowed: [what slows the export down: playing, scrubbing, battery, lagging, pressure] }
+export function allocate({ slots, user, pressure, demand, claude = 0, exportFirst = false, rush = false }, now = Date.now()) {
   const u = userFactor(user, now);
-  const headroom = Math.max(1, slots * u.f * claudeFactor(claude) * pressureFactor(pressure));
+  let f = u.f * claudeFactor(claude) * pressureFactor(pressure);
+  const slowed = [];
+  if (exportFirst && demand.export?.want > 0) {
+    const moving = u.mode === 'playing' || u.mode === 'scrubbing';
+    if (rush) f = pressureFactor({ level: pressure.level });
+    else {
+      f = (moving ? u.f : 1) * pressureFactor(pressure);
+      if (moving) slowed.push(u.mode);
+      if (pressure.battery) slowed.push('battery');
+      if (pressure.lagging) slowed.push('lagging');
+    }
+    if (pressure.level) slowed.push('pressure');
+  }
+  const headroom = Math.max(1, slots * f);
   const scores = {};
   const heap = new MaxHeap();
   const held = [];
@@ -151,5 +171,5 @@ export function allocate({ slots, user, pressure, demand, claude = 0 }, now = Da
   }
   // preview files: every spare slot when nothing renders (proxies out faster), still within their own limit
   if (!renders && demand.media?.want > shares.media) shares.media = Math.min(demand.media.want, shares.media + Math.floor(Math.max(0, left) / COST.media));
-  return { headroom: +headroom.toFixed(2), mode: u.mode, claude: claude > 0, held, shares, order, scores };
+  return { headroom: +headroom.toFixed(2), mode: u.mode, claude: claude > 0, held, shares, order, scores, slowed };
 }

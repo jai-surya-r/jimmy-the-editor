@@ -96,7 +96,7 @@ jobs:
       - name: Server tests (plain Node, Chrome render pages)
         run: >-
           node tests/run-suite.mjs "Server on macOS"
-          tests/mac-disk.mjs tests/scheduler.mjs tests/chat-tasks.mjs tests/chat-paths.mjs tests/clip-names.mjs
+          tests/mac-disk.mjs tests/scheduler.mjs tests/mac-scheduling.mjs tests/chat-tasks.mjs tests/chat-paths.mjs tests/clip-names.mjs
           tests/xml-timecode.mjs tests/template-files.mjs tests/export-folder.mjs tests/audio-export.mjs
           tests/proxy-duplicate.mjs tests/project-close.mjs "npm run golden" tests/export-options.mjs
           tests/transcripts.mjs tests/check-image.mjs tests/motion-signature.mjs tests/nest-audio.mjs tests/nest-audio-export.mjs tests/comments-follow.mjs tests/graph-ease.mjs
@@ -161,6 +161,7 @@ jobs:
         run: |
           f="/Applications/Jimmy - The Editor.app/Contents/Resources/app/vendor/ffmpeg/darwin-arm64/ffmpeg"
           "$f" -hide_banner -v error -f lavfi -i testsrc2=size=1280x720:rate=30 -t 2 -c:v h264_videotoolbox -y /tmp/vt.mp4 && echo "VideoToolbox H.264: works" || echo "VideoToolbox H.264: not available on this runner"
+          FFMPEG_PATH="$f" node tests/mac-gpu-detect.mjs
       - name: Tests on the installed app (Apple Silicon)
         env:
           JIMMY_APP: electron

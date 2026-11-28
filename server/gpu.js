@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
-import { FFMPEG, cpuH264, bitrateArgs } from './ffmpeg.js';
+import { FFMPEG, cpuH264, bitrateArgs, macScheduling, slotHints } from './ffmpeg.js';
 import { getConfig, updateConfig } from './config.js';
 import { tempRoot } from './cachedir.js';
 import { budget } from './budget.js';
@@ -90,18 +90,38 @@ const changed = () => { for (const fn of listeners) { try { fn(gpuInfo()); } cat
 
 // ------------------------------------------------------------------ settings
 
+const smart = () => getConfig().scheduler !== 'classic';
+// the device that helps most (faster, or much less CPU), or null
+function bestDevice() {
+  const usable = (getConfig().gpuDetected?.devices || []).filter((d) => d.encode);
+  const best = usable.slice().sort((a, b) => (b.speedup || 0) - (a.speedup || 0))[0] || null;
+  return best && (best.speedup >= 1.15 || best.cpuSaving >= 1.5) ? best : null;
+}
+// Mac, Smart scheduling: nobody has chosen yet, so the graphics hardware is used when the test shows it helps,
+// without asking (Settings can still pick "CPU only"). Classic scheduling and Windows ask once, as before.
+function autoDevice(s) {
+  if (s.asked || s.device || !macScheduling() || !smart()) return null;
+  return bestDevice()?.id || null;
+}
+
 export function gpuSettings() {
   const s = getConfig().gpu || {};
+  const auto = autoDevice(s);
   return {
-    device: s.device || null, // which detected device exports use, or null for the CPU only
+    device: s.device || auto || null, // which detected device exports use, or null for the CPU only
     draft: s.draft === 'cpu' ? 'cpu' : 'gpu',
     high: s.high === 'cpu' ? 'cpu' : 'gpu', // high and standard exports, and background pre-rendering
     battery: s.battery === 'cpu' ? 'cpu' : 'gpu',
-    asked: !!s.asked,
+    asked: !!s.asked || !!auto,
+    ...(auto ? { auto: true } : {}),
   };
 }
+// Settings sends what it shows: the automatic choice sent back unchanged is not a choice (it isn't saved, so
+// Classic scheduling still asks). null: nothing to save.
 export function cleanGpuSettings(s = {}) {
   const det = getConfig().gpuDetected?.devices || [];
+  const cur = gpuSettings();
+  if (cur.auto && (s.device || null) === cur.device && ['draft', 'high', 'battery'].every((k) => (s[k] === 'cpu' ? 'cpu' : 'gpu') === cur[k])) return null;
   return {
     device: det.some((d) => d.id === s.device && d.encode) ? s.device : null,
     draft: s.draft === 'cpu' ? 'cpu' : 'gpu', high: s.high === 'cpu' ? 'cpu' : 'gpu',
@@ -113,12 +133,11 @@ export function cleanGpuSettings(s = {}) {
 export function gpuInfo() {
   const det = getConfig().gpuDetected || null;
   const s = gpuSettings();
-  const usable = (det?.devices || []).filter((d) => d.encode);
-  const best = usable.slice().sort((a, b) => (b.speedup || 0) - (a.speedup || 0))[0] || null;
+  const best = bestDevice();
   return {
     detecting: !!detecting, detected: det, settings: s, failed,
-    // first time a GPU that helps is found: the editor asks whether to use it
-    ask: !s.asked && best && (best.speedup >= 1.15 || best.cpuSaving >= 1.5) ? best : null,
+    // first time a GPU that helps is found: the editor asks whether to use it (not on a Mac with Smart scheduling)
+    ask: !s.asked && best ? best : null,
   };
 }
 
@@ -138,8 +157,19 @@ export function engineFor(quality, format, { width = 0, height = 0 } = {}) {
   if (format === 'h264' && d.encode && Math.max(width, height) <= 4096) enc = d.id;
   else if (format === 'hevc' && d.hevc && Math.max(width, height) <= 8192) enc = `${d.id}-hevc`;
   else if (format === 'prores' && d.prores) enc = `${d.id}-prores`;
-  return { enc, dec: d.decode ? d.id : null };
+  // (Apple's decoders: with Smart scheduling only, so Classic on a Mac decodes as it always did)
+  return { enc, dec: d.decode && (d.id !== 'apple' || smart()) ? d.id : null };
 }
+
+// Mac, Smart scheduling, exports on Apple's media engines: a chunk needs fewer threads, so more render at once
+// (ffmpeg.js renderSlots), except while you play or scrub.
+export function macGpuExports() {
+  if (!macScheduling() || !smart()) return false;
+  const s = gpuSettings();
+  const d = (getConfig().gpuDetected?.devices || []).find((x) => x.id === s.device);
+  return !!d && d.id === 'apple' && d.encode && s.high === 'gpu' && !(failed && failed.device === d.id) && !(budget.battery && s.battery === 'cpu');
+}
+slotHints.perChunk = () => (macGpuExports() && !budget.moving() ? 2.5 : 4);
 
 // ffmpeg arguments for the encoder of a spec made by engineFor (null: the caller uses the CPU encoder)
 export function encoderArgs(spec) {
@@ -233,7 +263,7 @@ async function detectNow() {
     if (okEnc) {
       const chain = v.decode === 'cuda'
         ? ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-i', file, '-vf', 'scale_cuda=1280:720:interp_algo=bicubic:format=yuv444p,hwdownload,format=yuv444p,format=rgba']
-        : ['-hwaccel', v.decode, '-hwaccel_output_format', v.decode === 'd3d11va' ? 'd3d11' : v.decode, '-i', file, '-vf', 'hwdownload,format=nv12,format=rgba'];
+        : ['-hwaccel', v.decode, '-hwaccel_output_format', { d3d11va: 'd3d11', videotoolbox: 'videotoolbox_vld' }[v.decode] || v.decode, '-i', file, '-vf', 'hwdownload,format=nv12,format=rgba'];
       okDec = (await run(['-v', 'error', ...chain, '-f', 'null', '-'])).ok;
     }
     let okHevc = false;
@@ -256,8 +286,9 @@ async function detectNow() {
   return { sig: await signature(names), at: Date.now(), names, devices };
 }
 
-// raised when detection looks for something new (2: HEVC), so a cached result is detected again once
-const DETECT_VERSION = 2;
+// raised when detection looks for something new (2: HEVC; 3, Mac only: the VideoToolbox decode test fixed), so a
+// cached result is detected again once
+const DETECT_VERSION = process.platform === 'darwin' ? 3 : 2;
 async function signature(names) {
   let st = null;
   try { st = await fsp.stat(FFMPEG); } catch { /* none */ }

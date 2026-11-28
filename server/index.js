@@ -390,7 +390,7 @@ route('POST', '/api/settings', async (req) => {
     if (d) await fsp.mkdir(d, { recursive: true });
     patch.cacheDir = d;
   }
-  if (body.gpu) patch.gpu = cleanGpuSettings(body.gpu);
+  if (body.gpu) { const g = cleanGpuSettings(body.gpu); if (g) patch.gpu = g; }
   if (body.scheduler) patch.scheduler = body.scheduler === 'classic' ? 'classic' : 'smart';
   if ('exactPause' in body) patch.exactPause = !!body.exactPause;
   if ('chatConnectors' in body) patch.chatConnectors = !!body.chatConnectors; // new chats only (chats.js)
@@ -957,6 +957,12 @@ route('POST', '/api/p/:id/render', async (req, { id }) => {
   const job = await renders.create(h, body.audio ? 'audio' : 'video', body); // audio: an audio-only export in that format
   if (body.wait) { await job.done; }
   return { job: renders.publicJob(job) };
+});
+// Mac, Smart scheduling: "Full speed" in the Exports list (the exports running now ignore playing and battery)
+route('POST', '/api/budget/rush', async (req) => {
+  const body = await readJsonBody(req);
+  budget.setRush(body.on !== false);
+  return { budget: budget.info() };
 });
 route('POST', '/api/p/:id/still', async (req, { id }) => {
   const h = await needProject(id);

@@ -9,7 +9,7 @@
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
-import { renderSlots } from './ffmpeg.js';
+import { renderSlots, macScheduling } from './ffmpeg.js';
 import { getConfig } from './config.js';
 import { allocate } from './scheduler.js';
 
@@ -58,9 +58,14 @@ class Budget {
     this.claudeWorking = () => 0; // chats working (chats.js): Claude comes right after you
     this.lastInput = 0;
     this.plan = null;
+    this.rush = false; // Mac: "Full speed" for the exports running now (until none is left)
   }
 
   smart() { return getConfig().scheduler !== 'classic'; }
+  // you are playing or scrubbing (render slots on a Mac go back to the old count meanwhile, ffmpeg.js slotHints)
+  moving() { try { const u = this.userState(); return !!(u.playing || u.scrubbing); } catch { return false; } }
+  // Mac, Smart scheduling: the exports running now go at full speed until they are done (Exports list)
+  setRush(on) { this.rush = !!on && this.smart() && macScheduling(); this.replan(); }
 
   // a click or a key in an editor window
   noteInput() {
@@ -74,15 +79,21 @@ class Budget {
     if (!this.smart()) { this.plan = null; return; }
     const demand = {};
     for (const [k, fn] of Object.entries(this.demand)) { try { demand[k] = fn(); } catch { demand[k] = null; } }
+    const exportFirst = macScheduling();
+    if (this.rush && !(demand.export?.want > 0)) this.rush = false; // the exports it was for are done
     const plan = allocate({
       slots: renderSlots().slots,
       user: { ...this.userState(), lastInput: this.lastInput },
       pressure: { level: this.level, lagging: Date.now() < this.lagUntil || this.starved, battery: this.battery },
       demand,
       claude: this.claudeWorking(),
+      exportFirst, rush: this.rush,
     });
+    plan.rush = this.rush;
+    plan.exportFirst = exportFirst;
     const changed = !this.plan || JSON.stringify(plan.shares) !== JSON.stringify(this.plan.shares) || plan.mode !== this.plan.mode
-      || plan.claude !== this.plan.claude || plan.held.join() !== this.plan.held.join();
+      || plan.claude !== this.plan.claude || plan.held.join() !== this.plan.held.join()
+      || (exportFirst && (plan.slowed.join() !== this.plan.slowed.join() || plan.rush !== this.plan.rush || plan.headroom !== this.plan.headroom));
     this.plan = plan;
     if (changed) for (const fn of this.listeners) { try { fn(this.info()); } catch (err) { console.warn('[budget]', err.message); } }
   }
@@ -178,7 +189,8 @@ class Budget {
     const total = this.capacity();
     return {
       level: this.level, reason: this.reason, battery: this.battery, slots: total, full: renderSlots().slots,
-      ...(this.plan ? { mode: this.plan.mode, headroom: this.plan.headroom, shares: this.plan.shares, order: this.plan.order, claude: this.plan.claude, held: this.plan.held } : {}),
+      ...(this.plan ? { mode: this.plan.mode, headroom: this.plan.headroom, shares: this.plan.shares, order: this.plan.order, claude: this.plan.claude, held: this.plan.held,
+        ...(this.plan.exportFirst ? { exportFirst: true, slowed: this.plan.slowed, rush: this.plan.rush } : {}) } : {}),
     };
   }
 
